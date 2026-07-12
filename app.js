@@ -804,14 +804,14 @@
     if (options.showSprockets) {
       const topZoneY = y + options.textH - options.textSprocketShift;
       const bottomZoneY = y + stripH - options.textH - options.sprocketH + options.textSprocketShift;
-      // 上排齿孔贯穿整条，片头行的舌部也保留完整上排孔（与参考图一致）
-      drawSprockets(x, topZoneY, stripW, options);
+      // 下排齿孔贯穿整条，片头行的舌部落在下半，也保留完整下排孔（与参考图一致）
+      drawSprockets(x, bottomZoneY, stripW, options);
       if (rowInfo.leader) {
-        // 片头行：下半条在舌区被裁掉，下排孔只在恢复全高之后出现，避开过渡弧线
+        // 片头行：上半条在舌区被裁掉，上排孔只在恢复全高之后出现，避开过渡弧线
         const geo = leaderGeometry(x, y, stripH, options);
-        drawSprockets(x, bottomZoneY, stripW, options, geo.footX, null);
+        drawSprockets(x, topZoneY, stripW, options, geo.footX, null);
       } else {
-        drawSprockets(x, bottomZoneY, stripW, options);
+        drawSprockets(x, topZoneY, stripW, options);
       }
     }
 
@@ -855,7 +855,7 @@
     ctx.stroke();
   }
 
-  // 构建胶片条轮廓：普通行是圆角矩形；片头行左端是半宽片舌（下半条裁掉）；片尾行右端是剪刀切口
+  // 构建胶片条轮廓：普通行是圆角矩形；片头行左端是半宽片舌（上半条裁掉，舌落在下半）；片尾行右端是剪刀切口
   function buildStripPath(x, y, stripW, stripH, rowInfo, options) {
     const r = Math.max(6, Math.round(options.frameW * 0.015));
     const xr = x + stripW;
@@ -863,12 +863,26 @@
     ctx.beginPath();
 
     if (rowInfo.leader) {
-      // 片舌保留上半条（含完整上排齿孔），上缘与普通条一致，仅舌尖圆角略大
-      const { tongueR } = leaderGeometry(x, y, stripH, options);
-      ctx.moveTo(x + tongueR, y);
-    } else {
-      ctx.moveTo(x + r, y);
+      // 片头舌：上半条被裁掉，舌部保留下半（含完整下排齿孔），过渡弧线位于上方。
+      // 从舌部左缘起，沿切边（上）走到弧脚，S 形弧线平滑升到全高上缘，
+      // 再走完整上缘 → 右缘 → 下缘 → 回到舌尖，两角圆角收尾（经典 135 片舌形状）
+      const { cutY, footX, curveW, tongueR } = leaderGeometry(x, y, stripH, options);
+      ctx.moveTo(x, cutY + tongueR);
+      ctx.arcTo(x, cutY, x + tongueR, cutY, tongueR);
+      ctx.lineTo(footX - curveW, cutY);
+      ctx.bezierCurveTo(footX - curveW * 0.5, cutY, footX - curveW * 0.5, y, footX, y);
+      ctx.lineTo(xr - r, y);
+      ctx.arcTo(xr, y, xr, y + stripH, r);
+      ctx.lineTo(xr, y + stripH - r);
+      ctx.arcTo(xr, y + stripH, xr - r, y + stripH, r);
+      ctx.lineTo(x + tongueR, y + stripH);
+      ctx.arcTo(x, y + stripH, x, y + stripH - tongueR, tongueR);
+      ctx.lineTo(x, cutY + tongueR);
+      ctx.closePath();
+      return;
     }
+
+    ctx.moveTo(x + r, y);
 
     if (rowInfo.trailer) {
       // 剪刀切口：略斜的锯齿状右缘
@@ -887,22 +901,10 @@
       ctx.arcTo(xr, y + stripH, xr - r, y + stripH, r);
     }
 
-    if (rowInfo.leader) {
-      // 片头舌：下半条被裁掉——沿全高下缘走到弧脚，S 形弧线平滑升到舌部切边，
-      // 切边直行至舌尖，两角圆角收尾（参考图的经典 135 片舌形状）
-      const { cutY, footX, curveW, tongueR } = leaderGeometry(x, y, stripH, options);
-      ctx.lineTo(footX, y + stripH);
-      ctx.bezierCurveTo(footX - curveW * 0.5, y + stripH, footX - curveW * 0.5, cutY, footX - curveW, cutY);
-      ctx.lineTo(x + tongueR, cutY);
-      ctx.arcTo(x, cutY, x, cutY - tongueR, tongueR);
-      ctx.lineTo(x, y + tongueR);
-      ctx.arcTo(x, y, x + tongueR, y, tongueR);
-    } else {
-      ctx.lineTo(x + r, y + stripH);
-      ctx.arcTo(x, y + stripH, x, y, r);
-      ctx.lineTo(x, y + r);
-      ctx.arcTo(x, y, x + r, y, r);
-    }
+    ctx.lineTo(x + r, y + stripH);
+    ctx.arcTo(x, y + stripH, x, y, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
 
     ctx.closePath();
   }
@@ -910,15 +912,15 @@
   // 片头舌几何参数：轮廓与齿孔排布共用，保证孔永远不会压到舌部切口
   function leaderGeometry(x, y, stripH, options) {
     const r = Math.max(6, Math.round(options.frameW * 0.015));
-    // 舌部切边：略过片宽中线（参考图约 0.52），切掉的下半部分高度即过渡弧高
-    const cutY = y + Math.round(stripH * 0.52);
-    const curveH = y + stripH - cutY;
+    // 舌部切边：略过片宽中线（参考图约 0.48），切掉的上半部分高度即过渡弧高
+    const cutY = y + Math.round(stripH * 0.48);
+    const curveH = cutY - y;
     return {
       cutY,
       curveH,
       // 弧宽 ≈ 弧高，近似四分之一圆的平滑过渡
       curveW: curveH,
-      // 弧线与全高下缘的交点：舌区到此结束，其后恢复完整下排齿孔
+      // 弧线与全高上缘的交点：舌区到此结束，其后恢复完整上排齿孔
       footX: x + options.leaderW,
       tongueR: Math.min(r * 3, stripH * 0.12),
     };
@@ -933,8 +935,8 @@
     ctx.fillStyle = "rgb(0, 0, 0)";
     ctx.fillRect(baseStart, y, firstFrameX - baseStart - options.gap * 0.4, stripH);
 
-    // 曝光的舌部：浓黑，边缘带轻微倾斜的渐变过渡（曝光边缘）
-    const fog = ctx.createLinearGradient(x, y, x + options.leaderW * 0.92, y + stripH * 0.35);
+    // 曝光的舌部：浓黑，边缘带轻微倾斜的渐变过渡（曝光边缘）；舌落在下半，渐变偏下
+    const fog = ctx.createLinearGradient(x, y + stripH, x + options.leaderW * 0.92, y + stripH * 0.65);
     fog.addColorStop(0, "rgba(4, 3, 2, 0.97)");
     fog.addColorStop(0.62, "rgba(5, 4, 3, 0.94)");
     fog.addColorStop(0.85, "rgba(8, 6, 4, 0.5)");
