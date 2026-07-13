@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>胶片索引图生成器</title>
+    <title>海带索引图-FILM</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -11,9 +11,12 @@
       <aside class="controls" aria-label="索引图设置">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true"></div>
-          <div>
-            <h1>胶片索引图</h1>
-            <p>导入扫描件，生成每行六张的胶片索引图。</p>
+          <div class="brand-copy">
+            <div class="brand-title-row">
+              <h1>海带索引图</h1>
+              <span class="brand-film">FILM</span>
+            </div>
+            <p>整理扫描底片，生成可编辑、可导出的胶片索引图。</p>
           </div>
         </div>
 
@@ -221,9 +224,9 @@
         </div>
 
         <div class="preview-wrap" id="previewWrap">
-          <canvas id="previewCanvas" aria-label="胶片索引图预览"></canvas>
+          <canvas id="previewCanvas" aria-label="海带索引图-FILM 预览"></canvas>
           <div class="empty-state" id="emptyState">
-            <div class="empty-card">
+            <div class="empty-card empty-card-classic">
               <div class="empty-kicker">Contact Sheet</div>
               <div class="empty-film-preview" aria-hidden="true">
                 <div class="empty-strip">
@@ -246,10 +249,65 @@
                 <p>预览区域会在生成后显示完整索引图。</p>
               </div>
             </div>
+
+            <div class="film-demo-stage" id="filmDemoStage" data-demo-state="intro">
+              <div class="film-demo-heading">
+                <div>
+                  <span class="film-demo-index">HDF / CONTACT 001</span>
+                  <p>海带暗房 · 数字检片台</p>
+                </div>
+                <span class="film-demo-format">135 · 36 EXP</span>
+              </div>
+
+              <div class="film-demo-viewport" aria-hidden="true">
+                <div class="film-demo-rail film-demo-rail-top"></div>
+                <div class="film-demo-rail film-demo-rail-bottom"></div>
+                <div class="film-demo-strip">
+                  <div class="film-demo-sprockets film-demo-sprockets-top"></div>
+                  <div class="film-demo-edge-text">HAIDAI FILM · SAFETY FILM · C-41 · 001</div>
+                  <div class="film-demo-frames">
+                    <span style="--frame-index: 0"></span>
+                    <span style="--frame-index: 1"></span>
+                    <span style="--frame-index: 2"></span>
+                    <span style="--frame-index: 3"></span>
+                    <span style="--frame-index: 4"></span>
+                    <span style="--frame-index: 5"></span>
+                  </div>
+                  <div class="film-demo-frame-numbers">
+                    <span>01</span><span>02</span><span>03</span><span>04</span><span>05</span><span>06</span>
+                  </div>
+                  <div class="film-demo-sprockets film-demo-sprockets-bottom"></div>
+                </div>
+                <div class="film-demo-scan-gate"></div>
+                <div class="film-demo-progress"><span></span></div>
+              </div>
+
+              <div class="film-demo-copy">
+                <div class="film-demo-status-light" aria-hidden="true"></div>
+                <div>
+                  <h3 id="filmDemoTitle">装入你的底片扫描件</h3>
+                  <p id="filmDemoDescription">图片只在浏览器本地整理，生成一张可导出的胶片索引图。</p>
+                </div>
+              </div>
+
+              <div class="film-demo-controls" id="filmDemoControls" aria-label="FILM Demo 场景">
+                <button type="button" data-demo-action="intro">重播入场</button>
+                <button type="button" data-demo-action="dragging">模拟拖入</button>
+                <button type="button" data-demo-action="reading">模拟读取</button>
+                <button type="button" data-demo-action="idle">静止状态</button>
+                <button type="button" data-demo-action="motion">减少动态</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
     </main>
+
+    <nav class="ui-demo-switcher" aria-label="界面方案切换">
+      <span>方案预览</span>
+      <a href="?ui=classic" data-ui-link="classic">原版</a>
+      <a href="?ui=film-demo" data-ui-link="film-demo">FILM Demo</a>
+    </nav>
 
     <div class="notice" id="notice" role="status" aria-live="polite"></div>
 

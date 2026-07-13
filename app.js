@@ -1,4 +1,11 @@
 (function () {
+  const uiModeParam = new URLSearchParams(window.location.search).get("ui");
+  const uiMode = uiModeParam === "film-demo" ? "film-demo" : "classic";
+  document.body.dataset.uiMode = uiMode;
+  document.querySelectorAll("[data-ui-link]").forEach((link) => {
+    if (link.dataset.uiLink === uiMode) link.setAttribute("aria-current", "page");
+  });
+
   const fileInput = document.getElementById("fileInput");
   const dropZone = document.getElementById("dropZone");
   const previewWrap = document.getElementById("previewWrap");
@@ -52,6 +59,10 @@
   const cropClose = document.getElementById("cropClose");
   const cropCancel = document.getElementById("cropCancel");
   const cropApply = document.getElementById("cropApply");
+  const filmDemoStage = document.getElementById("filmDemoStage");
+  const filmDemoControls = document.getElementById("filmDemoControls");
+  const filmDemoTitle = document.getElementById("filmDemoTitle");
+  const filmDemoDescription = document.getElementById("filmDemoDescription");
 
   let activeCanvas = previewCanvas;
   let ctx = previewCanvas.getContext("2d");
@@ -156,6 +167,75 @@
   // 浏览器 canvas 尺寸安全上限（保守取值，超出后 toBlob 会得到 null）
   const MAX_CANVAS_SIDE = 16384;
   const MAX_CANVAS_AREA = 16384 * 16384;
+
+  const demoScenes = {
+    intro: {
+      title: "装入你的底片扫描件",
+      description: "图片只在浏览器本地整理，生成一张可导出的胶片索引图。",
+      progress: "0%",
+    },
+    dragging: {
+      title: "释放以装入扫描件",
+      description: "检片轨道已就绪，支持 JPG、PNG 与 WebP。",
+      progress: "0%",
+    },
+    reading: {
+      title: "正在读取 4 / 6 张",
+      description: "扫描门只演示界面反馈，不会触发真实导入或画布重绘。",
+      progress: "67%",
+    },
+    idle: {
+      title: "等待导入扫描件",
+      description: "检片台进入静止状态，仅保留低频片基反光。",
+      progress: "0%",
+    },
+  };
+
+  function setDemoScene(scene) {
+    if (!filmDemoStage || !demoScenes[scene]) return;
+    const next = demoScenes[scene];
+    filmDemoStage.dataset.demoState = scene;
+    filmDemoStage.style.setProperty("--demo-progress", next.progress);
+    filmDemoTitle.textContent = next.title;
+    filmDemoDescription.textContent = next.description;
+    filmDemoControls.querySelectorAll("[data-demo-action]").forEach((button) => {
+      if (button.dataset.demoAction === "motion") return;
+      const active = button.dataset.demoAction === scene;
+      button.setAttribute("aria-pressed", String(active));
+    });
+  }
+
+  function replayDemoIntro() {
+    if (!filmDemoStage) return;
+    setDemoScene("intro");
+    const animated = [filmDemoStage, ...filmDemoStage.querySelectorAll("*")];
+    animated.forEach((element) => {
+      element.style.animation = "none";
+    });
+    void filmDemoStage.offsetWidth;
+    animated.forEach((element) => {
+      element.style.removeProperty("animation");
+    });
+  }
+
+  if (uiMode === "film-demo" && filmDemoControls) {
+    setDemoScene("intro");
+    filmDemoControls.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-demo-action]");
+      if (!button) return;
+      const action = button.dataset.demoAction;
+      if (action === "motion") {
+        document.body.classList.toggle("demo-reduced-motion");
+        button.setAttribute("aria-pressed", String(document.body.classList.contains("demo-reduced-motion")));
+        return;
+      }
+      if (action === "intro") {
+        replayDemoIntro();
+        return;
+      }
+      setDemoScene(action);
+    });
+  }
 
   // ---- 文件导入事件绑定 ----
 
