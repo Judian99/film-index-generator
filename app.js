@@ -146,10 +146,11 @@
     holeW: 0.058, // 齿孔宽度 / frameW
     textH: 0.068, // 边字带高度 / frameW
     fontSize: 0.86, // 字号 / 边字带高度
+    fontSize120: 0.74, // 120 字号 / 边字带高度
     textOffsetY: 0.38, // 边字中线到胶片外缘的距离 / 边字带高度（真实底片边字几乎贴着片边）
     textSprocketGap: 0.022, // 齿孔带向边字方向收紧的距离 / frameW（越大边字与齿孔离得越近）
-    band120: 0.07, // 120 边字带高度 / 画幅高（真实上下留边各约 2.75mm / 56mm）
-    gap120: 0.035, // 120 帧间隙 / 画幅高（真实约 2mm，帧几乎相贴）
+    band120: 0.044, // 120 边字带高度 / 画幅高
+    gap120: 0.085, // 120 帧间隙 / 画幅高
   };
 
   // 浏览器 canvas 尺寸安全上限（保守取值，超出后 toBlob 会得到 null）
@@ -883,7 +884,7 @@
       textH = showEdgeText.checked ? Math.round(slotH * TUNE.band120) : 0;
       textSprocketShift = 0;
       // 关掉边字后窄黑留边（物理 rebate）仍占位
-      bandH = Math.max(sprocketH + textH, Math.round(slotH * 0.05));
+      bandH = Math.max(sprocketH + textH, Math.round(slotH * 0.02));
       stripPadX = Math.round(slotH * 0.05);
       // 齿孔节距按 135 物理孔距 4.75mm 对 56mm 画幅高换算（仅 ECN-2 电影卷可见）
       sprocketPitch = slotH * (4.75 / 56);
@@ -1303,8 +1304,9 @@
   }
 
   function edgeFont(options, scale = 1) {
-    const regularSize = Math.max(11, Math.round(options.textH * TUNE.fontSize));
-    const fontSize = Math.max(7, Math.round(regularSize * scale));
+    const sizeRatio = options.is120 ? TUNE.fontSize120 : TUNE.fontSize;
+    const regularSize = Math.max(options.is120 ? 1 : 11, Math.round(options.textH * sizeRatio));
+    const fontSize = Math.max(options.is120 ? 1 : 7, Math.round(regularSize * scale));
     return { fontSize, font: `700 ${fontSize}px "Courier New", monospace` };
   }
 
@@ -1726,6 +1728,10 @@
       }
     });
   });
+
+  previewWrap.addEventListener("scroll", hideFrameMenu, { passive: true });
+  window.addEventListener("scroll", hideFrameMenu, { passive: true });
+  window.addEventListener("resize", hideFrameMenu);
 
   // 点击菜单外关闭
   document.addEventListener("pointerdown", (event) => {
@@ -2302,8 +2308,6 @@
       { key: "fontSize", label: "字号 (×边字带)", min: 0.4, max: 1.2, step: 0.02 },
       { key: "textOffsetY", label: "边字到片边距离 (×边字带)", min: 0.2, max: 0.8, step: 0.02 },
       { key: "textSprocketGap", label: "齿孔向边字收紧 (×frameW)", min: 0, max: 0.05, step: 0.002 },
-      { key: "band120", label: "120 边带高度 (×画幅高)", min: 0.04, max: 0.12, step: 0.002 },
-      { key: "gap120", label: "120 帧间隙 (×画幅高)", min: 0.015, max: 0.08, step: 0.002 },
     ];
     const defaults = { ...TUNE };
 
