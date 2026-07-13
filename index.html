@@ -133,13 +133,26 @@
             <span>画幅</span>
             <select id="frameAspect">
               <option value="1.5" selected>135 全画幅 3:2</option>
-              <option value="0.75">半格 3:4</option>
+              <option value="0.75">半格 3:4（每行 12 张）</option>
               <option value="1">6×6 方画幅 1:1</option>
               <option value="1.35">6×4.5 中画幅</option>
               <option value="1.25">6×7 中画幅</option>
               <option value="2.7">XPan 宽幅 65:24</option>
             </select>
           </label>
+          <div class="field" id="halfFrameModeField" hidden>
+            <span>半格输入</span>
+            <div class="segmented" role="radiogroup" aria-label="半格输入方式">
+              <label>
+                <input type="radio" name="halfFrameMode" value="cropped" checked />
+                <span>单张裁切</span>
+              </label>
+              <label>
+                <input type="radio" name="halfFrameMode" value="uncropped" />
+                <span>单张未裁切</span>
+              </label>
+            </div>
+          </div>
           <label class="field">
             <span>每行张数</span>
             <select id="columnsSelect">
@@ -149,6 +162,7 @@
               <option value="7">7 张</option>
               <option value="8">8 张</option>
             </select>
+            <small id="columnsHint" class="field-hint" hidden></small>
           </label>
           <label class="field">
             <span>单张宽度</span>

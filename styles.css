@@ -611,6 +611,17 @@ select {
   accent-color: var(--accent);
 }
 
+.field select:disabled {
+  background: #f2efe9;
+  color: var(--muted);
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .primary-button {
   display: inline-flex;
   justify-content: center;

@@ -26,7 +26,10 @@
   const stockImportButton = document.getElementById("stockImportButton");
   const stockImportInput = document.getElementById("stockImportInput");
   const frameAspect = document.getElementById("frameAspect");
+  const halfFrameModeField = document.getElementById("halfFrameModeField");
+  const halfFrameModeInputs = document.querySelectorAll("input[name='halfFrameMode']");
   const columnsSelect = document.getElementById("columnsSelect");
+  const columnsHint = document.getElementById("columnsHint");
   const frameWidthInput = document.getElementById("frameWidth");
   const exportScale = document.getElementById("exportScale");
   const formatSelect = document.getElementById("formatSelect");
@@ -70,6 +73,7 @@
     // 帧操作菜单与裁切工具
     contextItemId: null,
     cropState: null,
+    reprocessGeneration: 0,
   };
 
   // ---- 胶卷型号：内置与自定义同构的型号对象，按冲洗工艺分档取默认外观 ----
@@ -126,6 +130,7 @@
   const DEFAULT_STOCK_ID = "kodak-portra-400";
   const STORAGE_STOCKS_KEY = "filmIndex.customStocks";
   const STORAGE_SELECTED_KEY = "filmIndex.selectedStock";
+  const EDGE_NUMBER_SUFFIX_SCALE = 0.68;
 
   // 可调渲染参数（均为相对"单张宽度"或所在分区的比例）。
   // 侧栏"高级设置"菜单内有滑块可实时调整。
@@ -201,7 +206,6 @@
     showEdgeText,
     showSprockets,
     showLeader,
-    frameAspect,
     columnsSelect,
     frameWidthInput,
     formatSelect,
@@ -209,6 +213,11 @@
   ].forEach((control) => {
     control.addEventListener("input", scheduleRender);
     control.addEventListener("change", scheduleRender);
+  });
+
+  frameAspect.addEventListener("change", handleFrameModeChange);
+  halfFrameModeInputs.forEach((control) => {
+    control.addEventListener("change", handleFrameModeChange);
   });
 
   formatSelect.addEventListener("change", () => {
@@ -235,6 +244,7 @@
   });
 
   clearButton.addEventListener("click", () => {
+    state.reprocessGeneration += 1;
     state.items.forEach(releaseItem);
     state.items = [];
     render();
@@ -379,10 +389,10 @@
       layout.rows.length - 1,
     );
     const rowInfo = layout.rows[row];
-    const slotOffset = rowInfo.leader ? 1 : 0;
     const frameStartX = options.sheetPad + options.stripPadX;
+    const contentStartX = getRowContentStartX(frameStartX, rowInfo, options);
     const slot = clamp(
-      Math.round((point.x - frameStartX) / (options.frameW + options.gap)) - slotOffset,
+      Math.round((point.x - contentStartX) / (options.slotW + options.slotGap)),
       0,
       rowInfo.count,
     );
@@ -409,40 +419,99 @@
     document.querySelector("input[name='sortMode'][value='custom']").checked = true;
   }
 
+  function isHalfFrameMode() {
+    return frameAspect.value === "0.75";
+  }
+
+  function getHalfFrameInputMode() {
+    return document.querySelector("input[name='halfFrameMode']:checked")?.value || "cropped";
+  }
+
+  function isCroppedHalfFrameMode() {
+    return isHalfFrameMode() && getHalfFrameInputMode() === "cropped";
+  }
+
+  function updateFrameModeControls() {
+    const halfFrame = isHalfFrameMode();
+    const cropped = isCroppedHalfFrameMode();
+    halfFrameModeField.hidden = !halfFrame;
+    columnsSelect.disabled = cropped;
+    if (columnsHint) {
+      columnsHint.textContent = cropped
+        ? "单张裁切固定每行 12 张（片头首行 10 张）"
+        : halfFrame
+          ? "每个文件按一张包含两格的横向扫描图处理"
+          : "";
+      columnsHint.hidden = !halfFrame;
+    }
+  }
+
+  async function handleFrameModeChange() {
+    updateFrameModeControls();
+    closeCropModal();
+    if (!state.items.length) {
+      render();
+      return;
+    }
+    await rebuildAllItemSources(true);
+  }
+
+  function getRowContentStartX(frameStartX, rowInfo, options) {
+    return frameStartX + (rowInfo.leader ? options.leaderAdvance : 0);
+  }
+
+  function getSlotX(contentStartX, slot, options) {
+    return contentStartX + slot * (options.slotW + options.slotGap);
+  }
+
   qualityField.style.display = "none";
+  updateFrameModeControls();
   drawEmptyCanvas();
   applyPreviewZoom();
 
   async function readImageFile(file) {
-    const [decoded, taken] = await Promise.all([
+    const [originalSource, taken] = await Promise.all([
       decodeImage(file),
       readExifDate(file).catch(() => null),
     ]);
-    const source = await normalizeOrientation(decoded);
-    return {
+    const item = {
       id: state.nextId++,
       file,
-      source,
-      width: source.width,
-      height: source.height,
+      originalSource,
+      originalWidth: originalSource.width,
+      originalHeight: originalSource.height,
+      editSource: null,
+      editWidth: originalSource.width,
+      editHeight: originalSource.height,
+      manualTurns: 0,
+      autoTurns: 0,
+      editVersion: 0,
+      source: originalSource,
+      width: originalSource.width,
+      height: originalSource.height,
       name: file.name,
       modified: file.lastModified || 0,
       taken,
       thumbUrl: URL.createObjectURL(file),
     };
+    await rebuildItemSource(item, state.reprocessGeneration, item.editVersion);
+    return item;
   }
 
-  // 导入预处理：竖图统一顺时针旋转 90 度，与横向的胶片画幅方向一致
-  async function normalizeOrientation(source) {
-    if (source.height <= source.width) return source;
-    const canvas = document.createElement("canvas");
-    canvas.width = source.height;
-    canvas.height = source.width;
-    const rotCtx = canvas.getContext("2d");
-    rotCtx.translate(canvas.width, 0);
-    rotCtx.rotate(Math.PI / 2);
-    rotCtx.drawImage(source, 0, 0);
-    if (typeof source.close === "function") source.close();
+  function closeSource(source) {
+    if (source && typeof source.close === "function") source.close();
+  }
+
+  function closeDistinctSources(...sources) {
+    const seen = new Set();
+    sources.forEach((source) => {
+      if (!source || seen.has(source)) return;
+      seen.add(source);
+      closeSource(source);
+    });
+  }
+
+  async function canvasToSource(canvas) {
     if (typeof createImageBitmap === "function") {
       try {
         return await createImageBitmap(canvas);
@@ -451,6 +520,71 @@
       }
     }
     return canvas;
+  }
+
+  async function rotateSourceClockwise(source) {
+    const canvas = document.createElement("canvas");
+    canvas.width = source.height;
+    canvas.height = source.width;
+    const rotCtx = canvas.getContext("2d");
+    rotCtx.translate(canvas.width, 0);
+    rotCtx.rotate(Math.PI / 2);
+    rotCtx.drawImage(source, 0, 0);
+    return canvasToSource(canvas);
+  }
+
+  function targetPortraitMode() {
+    return isCroppedHalfFrameMode();
+  }
+
+  async function rebuildItemSource(item, generation, editVersion) {
+    const base = item.editSource || item.originalSource;
+    let candidate = base;
+    const derived = [];
+    let autoTurns = 0;
+    const portrait = targetPortraitMode();
+    const matches = portrait ? base.height >= base.width : base.width >= base.height;
+
+    if (!matches) {
+      candidate = await rotateSourceClockwise(candidate);
+      derived.push(candidate);
+      autoTurns = 1;
+    }
+
+    for (let turn = 0; turn < item.manualTurns; turn += 1) {
+      const next = await rotateSourceClockwise(candidate);
+      if (candidate !== base) closeSource(candidate);
+      candidate = next;
+      derived.push(candidate);
+    }
+
+    const current = generation === state.reprocessGeneration && editVersion === item.editVersion;
+    if (!current) {
+      if (candidate !== base) closeSource(candidate);
+      return false;
+    }
+
+    const previous = item.source;
+    item.source = candidate;
+    item.width = candidate.width;
+    item.height = candidate.height;
+    item.autoTurns = autoTurns;
+    if (previous !== item.originalSource && previous !== item.editSource && previous !== candidate) {
+      closeSource(previous);
+    }
+    return true;
+  }
+
+  async function rebuildAllItemSources(fitAfter = false) {
+    const generation = ++state.reprocessGeneration;
+    previewWrap.classList.add("is-loading");
+    exportButton.disabled = true;
+    const items = [...state.items];
+    await Promise.all(items.map((item) => rebuildItemSource(item, generation, item.editVersion)));
+    if (generation !== state.reprocessGeneration) return;
+    render();
+    renderPhotoList();
+    if (fitAfter) fitPreviewToViewport();
   }
 
   async function decodeImage(file) {
@@ -646,32 +780,58 @@
   }
 
   function getRenderOptions(scale) {
-    const frameW = clamp(Number(frameWidthInput.value) || 420, 180, 1200) * scale;
+    const baseFrameW = clamp(Number(frameWidthInput.value) || 420, 180, 1200) * scale;
     const ratio = Number(frameAspect.value) || 1.5;
-    const frameH = Math.round(frameW / ratio);
-    const gap = Math.max(10 * scale, Math.round(frameW * 0.045));
+    const isHalfFrame = isHalfFrameMode();
+    const isCroppedHalfFrame = isCroppedHalfFrameMode();
+    const baseFrameH = Math.round(baseFrameW / 1.5);
+    const normalGap = Math.max(10 * scale, Math.round(baseFrameW * 0.045));
+    const selectedColumns = clamp(Number(columnsSelect.value) || 6, 3, 8);
+    const slotCount = isCroppedHalfFrame ? 12 : selectedColumns;
+    const slotW = isCroppedHalfFrame ? baseFrameW / 2 : baseFrameW;
+    const slotH = isHalfFrame ? baseFrameH : Math.round(baseFrameW / ratio);
+    const normalSixFrameAreaW = 6 * baseFrameW + 5 * normalGap;
+    const slotGap = isCroppedHalfFrame
+      ? (normalSixFrameAreaW - slotCount * slotW) / (slotCount - 1)
+      : normalGap;
+    const frameAreaW = isCroppedHalfFrame
+      ? normalSixFrameAreaW
+      : slotCount * slotW + (slotCount - 1) * slotGap;
 
     // 型号 edgeText 为空表示底片无边字：只跳过边字绘制，边字带仍照常占位，布局与有边字时一致
     const stock = resolveStock(getActiveStock());
     const hasEdgeText = showEdgeText.checked && Boolean(stock.edgeText);
 
     // 上下带分为两个不重叠的分区：外侧边字带 + 内侧齿孔带（边字印在齿孔外缘）
-    const sprocketH = showSprockets.checked ? Math.round(frameW * TUNE.sprocketH) : 0;
-    const textH = showEdgeText.checked ? Math.round(frameW * TUNE.textH) : 0;
+    const sprocketH = showSprockets.checked ? Math.round(baseFrameW * TUNE.sprocketH) : 0;
+    const textH = showEdgeText.checked ? Math.round(baseFrameW * TUNE.textH) : 0;
     // 齿孔带向外缘方向收紧，让齿孔更贴近边字（仅两者都显示时生效）
     const textSprocketShift =
-      sprocketH && textH ? Math.min(Math.round(frameW * TUNE.textSprocketGap), textH) : 0;
-    const bandH = Math.max(sprocketH + textH - textSprocketShift, Math.round(frameW * 0.055));
+      sprocketH && textH ? Math.min(Math.round(baseFrameW * TUNE.textSprocketGap), textH) : 0;
+    const bandH = Math.max(sprocketH + textH - textSprocketShift, Math.round(baseFrameW * 0.055));
 
-    const stripPadX = Math.round(frameW * 0.085);
-    const sheetPad = Math.round(frameW * 0.18);
-    const rowGap = Math.round(frameW * 0.14);
+    const stripPadX = Math.round(baseFrameW * 0.085);
+    const sheetPad = Math.round(baseFrameW * 0.18);
+    const rowGap = Math.round(baseFrameW * 0.14);
 
     return {
-      frameW,
-      frameH,
+      frameW: baseFrameW,
+      frameH: slotH,
+      baseFrameW,
+      baseFrameH,
       ratio,
-      gap,
+      gap: normalGap,
+      slotW,
+      slotH,
+      slotGap,
+      slotCount,
+      frameAreaW,
+      edgeMarkW: baseFrameW,
+      edgeMarkGap: normalGap,
+      edgeMarkSlotSpan: isCroppedHalfFrame ? 2 : 1,
+      isHalfFrame,
+      isCroppedHalfFrame,
+      leaderSlots: isCroppedHalfFrame ? 2 : 1,
       bandH,
       sprocketH,
       textH,
@@ -679,12 +839,13 @@
       stripPadX,
       sheetPad,
       rowGap,
-      columns: clamp(Number(columnsSelect.value) || 6, 3, 8),
+      columns: slotCount,
       showEdgeText: hasEdgeText,
       showSprockets: showSprockets.checked,
       showLeader: showLeader.checked,
-      // 片头舌区域占一个帧位宽
-      leaderW: frameW + gap,
+      // 片头舌保持普通 135 单格宽；半格下占两个半格槽位
+      leaderW: baseFrameW + normalGap,
+      leaderAdvance: isCroppedHalfFrame ? 2 * (slotW + slotGap) : baseFrameW + normalGap,
       stock,
     };
   }
@@ -696,21 +857,24 @@
     let rowIdx = 0;
     do {
       const leader = options.showLeader && rowIdx === 0;
-      const capacity = leader ? options.columns - 1 : options.columns;
+      const leaderSlots = leader ? options.leaderSlots : 0;
+      const capacity = options.slotCount - leaderSlots;
       const count = Math.min(capacity, itemCount - index);
-      rows.push({ start: index, count, capacity, leader, trailer: false });
+      rows.push({ start: index, count, capacity, leader, leaderSlots, trailer: false, trimmed: false });
       index += count;
       rowIdx += 1;
     } while (index < itemCount);
-    rows[rows.length - 1].trailer = options.showLeader;
+    const lastRow = rows[rows.length - 1];
+    lastRow.trailer = options.showLeader;
+    lastRow.trimmed = lastRow.count < lastRow.capacity;
     return rows;
   }
 
   function computeLayout(itemCount, options) {
     const rows = buildRows(itemCount, options);
-    const frameAreaW = options.columns * options.frameW + (options.columns - 1) * options.gap;
+    const frameAreaW = options.frameAreaW;
     const stripW = frameAreaW + options.stripPadX * 2;
-    const stripH = options.bandH * 2 + options.frameH;
+    const stripH = options.bandH * 2 + options.slotH;
     const canvasW = Math.round(stripW + options.sheetPad * 2);
     const canvasH = Math.round(rows.length * stripH + (rows.length - 1) * options.rowGap + options.sheetPad * 2);
     return { rows, stripW, stripH, canvasW, canvasH };
@@ -752,13 +916,14 @@
 
   function drawFilmRow(items, rowInfo, x, y, layout, rowIndex, options, isPreview) {
     const stripH = layout.stripH;
-    const slotOffset = rowInfo.leader ? 1 : 0;
-    const usedSlots = rowInfo.count + slotOffset;
-    // 片尾行：胶片在最后一帧后被剪断，条更短
-    const stripW =
-      rowInfo.trailer && usedSlots < options.columns
-        ? options.stripPadX * 2 + usedSlots * (options.frameW + options.gap) - options.gap
-        : layout.stripW;
+    const contentWidth = rowInfo.count
+      ? rowInfo.count * options.slotW + (rowInfo.count - 1) * options.slotGap
+      : 0;
+    const usedWidth = (rowInfo.leader ? options.leaderAdvance : 0) + contentWidth;
+    // 未填满的末行在最后一帧后截断；trailer 仅控制模拟片尾的剪切外观
+    const stripW = rowInfo.trimmed
+      ? options.stripPadX * 2 + usedWidth
+      : layout.stripW;
 
     // 胶片条投影，让条从纸面上"浮"起来
     ctx.save();
@@ -821,28 +986,28 @@
     }
 
     const frameStartX = x + options.stripPadX;
+    const contentStartX = getRowContentStartX(frameStartX, rowInfo, options);
     items.forEach((item, index) => {
-      const slot = index + slotOffset;
-      const frameX = frameStartX + slot * (options.frameW + options.gap);
+      const frameX = getSlotX(contentStartX, index, options);
       const frameY = y + options.bandH;
-      drawFrame(item, frameX, frameY, options.frameW, options.frameH, isPreview);
+      drawFrame(item, frameX, frameY, options.slotW, options.slotH, isPreview);
       if (isPreview) {
         state.frameRects.push({
           id: item.id,
           x: frameX,
           y: frameY,
-          w: options.frameW,
-          h: options.frameH,
+          w: options.slotW,
+          h: options.slotH,
         });
       }
     });
 
-    // 片尾行已被剪短，无需空帧；其余行的空位显示为未曝光的纯黑
-    if (!rowInfo.trailer) {
-      for (let slot = usedSlots; slot < options.columns; slot += 1) {
-        const frameX = frameStartX + slot * (options.frameW + options.gap);
+    // 截断行无需空帧；只有未截断的普通行才用未曝光纯黑补足空位
+    if (!rowInfo.trimmed) {
+      for (let slot = rowInfo.count; slot < rowInfo.capacity; slot += 1) {
+        const frameX = getSlotX(contentStartX, slot, options);
         const frameY = y + options.bandH;
-        drawBlankFrame(frameX, frameY, options.frameW, options.frameH);
+        drawBlankFrame(frameX, frameY, options.slotW, options.slotH);
       }
     }
 
@@ -1034,9 +1199,44 @@
     }
   }
 
-  function edgeFont(options) {
-    const fontSize = Math.max(11, Math.round(options.textH * TUNE.fontSize));
+  function edgeFont(options, scale = 1) {
+    const regularSize = Math.max(11, Math.round(options.textH * TUNE.fontSize));
+    const fontSize = Math.max(7, Math.round(regularSize * scale));
     return { fontSize, font: `700 ${fontSize}px "Courier New", monospace` };
+  }
+
+  // 图片槽位与胶片出厂边字的物理节距相互独立：裁切半格每两个图片槽共用一个标准 135 边字格。
+  function getEdgeMarkLayout(x, stripW, rowInfo, options) {
+    const markPitch = options.edgeMarkW + options.edgeMarkGap;
+    const startX = x + options.stripPadX + (rowInfo.leader ? markPitch : 0);
+    const markCount = Math.ceil(rowInfo.capacity / options.edgeMarkSlotSpan);
+    const endX = x + stripW;
+    const marks = [];
+
+    for (let mark = 0; mark < markCount; mark += 1) {
+      const markX = startX + mark * markPitch;
+      // 片尾可能在一个物理边字格中间剪断；保留已开始的边字，让条带轮廓负责裁切。
+      if (markX >= endX) break;
+      marks.push({
+        x: markX,
+        index: Math.floor(rowInfo.start / options.edgeMarkSlotSpan) + mark,
+      });
+    }
+
+    return marks;
+  }
+
+  function drawFrameNumberWithSuffix(frameNumber, x, baseline, options) {
+    const digits = `${frameNumber}`;
+    const regularFont = edgeFont(options).font;
+    ctx.font = regularFont;
+    ctx.fillText(digits, x, baseline);
+
+    const digitWidth = ctx.measureText(digits).width;
+    const suffixFont = edgeFont(options, EDGE_NUMBER_SUFFIX_SCALE).font;
+    ctx.font = suffixFont;
+    ctx.fillText("A", x + digitWidth, baseline);
+    ctx.font = regularFont;
   }
 
   function setEdgeInk(options) {
@@ -1051,22 +1251,19 @@
     const { font } = edgeFont(options);
     // 边字紧贴胶片外缘：中线距上缘 textOffsetY × 边字带高度
     const baseline = zoneY + Math.round(options.textH * TUNE.textOffsetY);
-    const frameStartX = x + options.stripPadX;
     const presets = options.stock.edgePresets;
     const preset = presets[rowIndex % presets.length];
-    const slotOffset = rowInfo.leader ? 1 : 0;
+    const marks = getEdgeMarkLayout(x, stripW, rowInfo, options);
 
     ctx.save();
     ctx.font = font;
     ctx.textBaseline = "middle";
     setEdgeInk(options);
 
-    for (let slot = slotOffset; slot < options.columns; slot += 1) {
-      const frameX = frameStartX + slot * (options.frameW + options.gap);
-      if (frameX + options.frameW > x + stripW) break;
-      const label = slot % 2 === 0 ? options.stock.edgeText : preset;
-      ctx.fillText(label, frameX, baseline, options.frameW * 0.94);
-    }
+    marks.forEach((mark, index) => {
+      const label = index % 2 === 0 ? options.stock.edgeText : preset;
+      ctx.fillText(label, mark.x, baseline, options.edgeMarkW * 0.94);
+    });
     ctx.restore();
   }
 
@@ -1075,31 +1272,33 @@
     const { fontSize, font } = edgeFont(options);
     // 下边字同样贴外缘（即靠近胶片下边）：与上边字对称
     const baseline = zoneY + options.textH - Math.round(options.textH * TUNE.textOffsetY);
-    const frameStartX = x + options.stripPadX;
-    const slotOffset = rowInfo.leader ? 1 : 0;
+    const marks = getEdgeMarkLayout(x, stripW, rowInfo, options);
 
     ctx.save();
     ctx.font = font;
     ctx.textBaseline = "middle";
     setEdgeInk(options);
 
-    for (let slot = slotOffset; slot < options.columns; slot += 1) {
-      const frameX = frameStartX + slot * (options.frameW + options.gap);
-      if (frameX + options.frameW > x + stripW) break;
-      const frameNumber = rowInfo.start + (slot - slotOffset) + 1;
-      ctx.fillText(`${frameNumber}`, frameX + Math.round(options.frameW * 0.03), baseline);
+    marks.forEach((mark) => {
+      const frameNumber = mark.index + 1;
+      ctx.fillText(`${frameNumber}`, mark.x + Math.round(options.edgeMarkW * 0.03), baseline);
       // 半格双号（N/NA）是 135 负片惯例；正片和电影卷只有单号
       if (options.stock.frameNumberStyle === "N/NA") {
-        ctx.fillText(`${frameNumber}A`, frameX + Math.round(options.frameW * 0.52), baseline);
+        drawFrameNumberWithSuffix(
+          frameNumber,
+          mark.x + Math.round(options.edgeMarkW * 0.52),
+          baseline,
+          options,
+        );
       }
       // 帧界处的小方点标记
       ctx.fillRect(
-        frameX + options.frameW - Math.round(fontSize * 0.45),
+        mark.x + options.edgeMarkW - Math.round(fontSize * 0.45),
         baseline - Math.round(fontSize * 0.16),
         Math.round(fontSize * 0.32),
         Math.round(fontSize * 0.32),
       );
-    }
+    });
     ctx.restore();
   }
 
@@ -1131,19 +1330,19 @@
     );
     if (row < 0) row = layout.rows.length - 1;
     const rowInfo = layout.rows[row];
-    const slotOffset = rowInfo.leader ? 1 : 0;
-    const slot = dropIndex - rowInfo.start + slotOffset;
+    const slot = dropIndex - rowInfo.start;
     const frameStartX = options.sheetPad + options.stripPadX;
-    const lineX = frameStartX + slot * (options.frameW + options.gap) - options.gap / 2;
+    const contentStartX = getRowContentStartX(frameStartX, rowInfo, options);
+    const lineX = getSlotX(contentStartX, slot, options) - options.slotGap / 2;
     const frameY = options.sheetPad + row * (layout.stripH + options.rowGap) + options.bandH;
-    const inset = Math.round(options.frameH * 0.06);
+    const inset = Math.round(options.slotH * 0.06);
 
     ctx.save();
     ctx.shadowColor = "rgba(255, 176, 64, 0.9)";
     ctx.shadowBlur = 8;
     ctx.fillStyle = "#ffb040";
     const lineW = Math.max(3, Math.round(options.frameW * 0.012));
-    roundedRect(ctx, lineX - lineW / 2, frameY - inset, lineW, options.frameH + inset * 2, lineW / 2);
+    roundedRect(ctx, lineX - lineW / 2, frameY - inset, lineW, options.slotH + inset * 2, lineW / 2);
     ctx.fill();
     ctx.restore();
   }
@@ -1223,6 +1422,7 @@
   function removeItem(id) {
     const index = state.items.findIndex((item) => item.id === id);
     if (index < 0) return;
+    state.reprocessGeneration += 1;
     releaseItem(state.items[index]);
     state.items.splice(index, 1);
     render();
@@ -1230,9 +1430,7 @@
   }
 
   function releaseItem(item) {
-    if (item.source && typeof item.source.close === "function") {
-      item.source.close();
-    }
+    closeDistinctSources(item.source, item.editSource, item.originalSource);
     URL.revokeObjectURL(item.thumbUrl);
   }
 
@@ -1392,6 +1590,7 @@
       cropY,
       cropW,
       cropH,
+      editVersion: item.editVersion,
       drag: null,
     };
 
@@ -1494,40 +1693,44 @@
 
   cropApply.addEventListener("click", async () => {
     if (!state.cropState) return;
-    const { itemId, scale, cropX, cropY, cropW, cropH } = state.cropState;
+    const { itemId, scale, cropX, cropY, cropW, cropH, editVersion } = state.cropState;
     const item = state.items.find((entry) => entry.id === itemId);
-    if (!item) return;
+    if (!item || item.editVersion !== editVersion) {
+      closeCropModal();
+      showNotice("图片状态已变化，请重新打开裁切工具");
+      return;
+    }
 
-    // 从原图裁切（按实际尺寸）
     const realX = Math.round(cropX / scale);
     const realY = Math.round(cropY / scale);
     const realW = Math.round(cropW / scale);
     const realH = Math.round(cropH / scale);
-
     const canvas = document.createElement("canvas");
     canvas.width = realW;
     canvas.height = realH;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(item.source, realX, realY, realW, realH, 0, 0, realW, realH);
+    const cropCtx = canvas.getContext("2d");
+    cropCtx.drawImage(item.source, realX, realY, realW, realH, 0, 0, realW, realH);
+    const newEditSource = await canvasToSource(canvas);
 
-    // 释放旧资源
-    if (item.source && typeof item.source.close === "function") {
-      item.source.close();
+    const oldEditSource = item.editSource;
+    const oldRenderSource = item.source;
+    item.editSource = newEditSource;
+    item.editWidth = realW;
+    item.editHeight = realH;
+    item.manualTurns = 0;
+    item.editVersion += 1;
+    const generation = ++state.reprocessGeneration;
+    await rebuildItemSource(item, generation, item.editVersion);
+    if (oldEditSource && oldEditSource !== item.originalSource && oldEditSource !== item.source) {
+      closeSource(oldEditSource);
     }
-
-    // 替换为裁切后的图片
-    let newSource = canvas;
-    if (typeof createImageBitmap === "function") {
-      try {
-        newSource = await createImageBitmap(canvas);
-      } catch (error) {
-        // 落回使用 canvas
-      }
+    if (
+      oldRenderSource !== item.originalSource &&
+      oldRenderSource !== oldEditSource &&
+      oldRenderSource !== item.source
+    ) {
+      closeSource(oldRenderSource);
     }
-
-    item.source = newSource;
-    item.width = realW;
-    item.height = realH;
 
     closeCropModal();
     render();
@@ -1540,33 +1743,10 @@
   async function rotateItem(itemId) {
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = item.height;
-    canvas.height = item.width;
-    const rotCtx = canvas.getContext("2d");
-    rotCtx.translate(canvas.width, 0);
-    rotCtx.rotate(Math.PI / 2);
-    rotCtx.drawImage(item.source, 0, 0);
-
-    if (item.source && typeof item.source.close === "function") {
-      item.source.close();
-    }
-
-    let newSource = canvas;
-    if (typeof createImageBitmap === "function") {
-      try {
-        newSource = await createImageBitmap(canvas);
-      } catch (error) {
-        // 落回使用 canvas
-      }
-    }
-
-    item.source = newSource;
-    const temp = item.width;
-    item.width = item.height;
-    item.height = temp;
-
+    item.manualTurns = (item.manualTurns + 1) % 4;
+    item.editVersion += 1;
+    const generation = ++state.reprocessGeneration;
+    await rebuildItemSource(item, generation, item.editVersion);
     render();
     renderPhotoList();
     showNotice("已旋转 90°");
@@ -1620,7 +1800,7 @@
 
     render();
     renderPhotoList();
-    fitPreviewToViewport();
+    await rebuildAllItemSources(true);
   }
 
   // ---- 胶卷型号：数据层 + 自定义型号面板 ----
