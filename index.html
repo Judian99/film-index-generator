@@ -63,10 +63,12 @@
             <input id="showSprockets" type="checkbox" checked />
             <span>模拟齿孔</span>
           </label>
+          <small id="sprocketsHint" class="field-hint" hidden></small>
           <label class="checkbox-row">
             <input id="showLeader" type="checkbox" checked />
             <span>模拟片头片尾</span>
           </label>
+          <small id="leaderHint" class="field-hint" hidden></small>
           <label class="field">
             <span>胶卷型号</span>
             <select id="stockSelect"></select>
@@ -132,12 +134,13 @@
           <label class="field">
             <span>画幅</span>
             <select id="frameAspect">
-              <option value="1.5" selected>135 全画幅 3:2</option>
-              <option value="0.75">半格 3:4（每行 12 张）</option>
-              <option value="1">6×6 方画幅 1:1</option>
-              <option value="1.35">6×4.5 中画幅</option>
-              <option value="1.25">6×7 中画幅</option>
-              <option value="2.7">XPan 宽幅 65:24</option>
+              <option value="135" selected>135 全画幅 3:2</option>
+              <option value="half">半格 3:4（每行 12 张）</option>
+              <option value="66">6×6 方画幅 1:1</option>
+              <option value="645">6×4.5 中画幅（竖幅）</option>
+              <option value="67">6×7 中画幅</option>
+              <option value="69">6×9 中画幅</option>
+              <option value="xpan">XPan 宽幅 65:24</option>
             </select>
           </label>
           <div class="field" id="halfFrameModeField" hidden>
@@ -156,6 +159,8 @@
           <label class="field">
             <span>每行张数</span>
             <select id="columnsSelect">
+              <option value="2">2 张</option>
+              <option value="3">3 张</option>
               <option value="4">4 张</option>
               <option value="5">5 张</option>
               <option value="6" selected>6 张</option>

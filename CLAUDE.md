@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 画布交互（仅预览 canvas）：`drawIndex` 在预览时把每帧的命中区域记录进 `state.frameRects`；pointerdown 命中帧则进入拖拽调序（幽灵缩略图 + `drawDropIndicator` 插入指示线），命中背景则拖拽平移（改 `previewWrap` 的 scrollLeft/Top）。坐标换算要除以 `state.previewZoom`
 
-- 所有绘制尺寸都由 `getRenderOptions(scale)` 从"单张宽度"派生，因此预览和导出共用同一套绘制代码。半格“单张裁切”使用 12 个半宽槽位（片头首行 10 张），条带尺寸对齐标准六格 135；半格“单张未裁切”把每个双格横向扫描文件作为一个 3:2 全幅槽位，恢复 `columnsSelect` 的 4–8 张排版
+- 所有绘制尺寸都由 `getRenderOptions(scale)` 从"单张宽度"派生，因此预览和导出共用同一套绘制代码。画幅由集中式 `FORMATS` 表驱动（`frameAspect` 的 option value 是格式 id：`135`/`half`/`645`/`66`/`67`/`69`/`xpan`），`medium` 标记 120 中画幅并锁定每行张数，`portrait` 标记竖幅槽位（645 横图经 `targetPortraitMode()` 自动转竖）。120 在 `getRenderOptions` 中走独立参数分支：所有比例以画幅高 `slotH`（对应真实 56mm）为基准，窄边带（`TUNE.band120`）、小帧间隙（`TUNE.gap120`）、平切端头（`buildStripPath` 极小圆角）、默认无齿孔无片头；边字按帧对齐走 `drawEdgeTextTop120`/`drawEdgeTextBottom120`（型号+帧号+▶箭头+DX 条码刻线，交替字样取 `PROCESS_DEFAULTS[].edgePresets120`）。半格“单张裁切”使用 12 个半宽槽位（片头首行 10 张），条带尺寸对齐标准六格 135；半格“单张未裁切”把每个双格横向扫描文件作为一个 3:2 全幅槽位，恢复 `columnsSelect` 的 4–8 张排版
 
 - 排序：`getSortedItems()` 支持名称 / 时间（优先 EXIF 拍摄时间，退回 mtime）/ 自定义三种模式；画布或照片列表中拖拽都会先 `solidifyCustomOrder()` 固化当前顺序再切到自定义模式
 

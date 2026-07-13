@@ -10,7 +10,9 @@
   const reverseSort = document.getElementById("reverseSort");
   const showEdgeText = document.getElementById("showEdgeText");
   const showSprockets = document.getElementById("showSprockets");
+  const sprocketsHint = document.getElementById("sprocketsHint");
   const showLeader = document.getElementById("showLeader");
+  const leaderHint = document.getElementById("leaderHint");
   const stockSelect = document.getElementById("stockSelect");
   const stockName = document.getElementById("stockName");
   const stockEdgeText = document.getElementById("stockEdgeText");
@@ -84,23 +86,27 @@
       // 彩负边字是曝光后的橙色染料影像
       edgeInk: { color: "rgba(255, 176, 64, 0.92)", glow: "rgba(255, 170, 60, 0.45)" },
       edgePresets: ["135-36", "C-41", "DX 5063", "SAFETY FILM", "135"],
+      edgePresets120: ["120", "C-41", "SAFETY FILM"],
       frameNumberStyle: "N/NA",
     },
     BW: {
       // 黑白负片边字是银盐影像，呈亮白/浅灰，无橙色染料
       edgeInk: { color: "rgba(238, 238, 232, 0.92)", glow: "rgba(240, 240, 235, 0.35)" },
       edgePresets: ["135-36", "SAFETY FILM", "DX 5063", "PANCHROMATIC", "135"],
+      edgePresets120: ["120", "SAFETY FILM", "PANCHROMATIC"],
       frameNumberStyle: "N/NA",
     },
     "E-6": {
       // 反转片边字取暖肤色 #f9c394（可读性优先，非严格拟真的暗色）
       edgeInk: { color: "rgba(249, 195, 148, 0.92)", glow: "rgba(249, 195, 148, 0.4)" },
       edgePresets: ["135-36", "E-6", "SAFETY FILM", "135"],
+      edgePresets120: ["120", "E-6"],
       frameNumberStyle: "N",
     },
     "ECN-2": {
       edgeInk: { color: "rgba(250, 230, 190, 0.92)", glow: "rgba(250, 230, 190, 0.35)" },
       edgePresets: ["EASTMAN", "KEEP FILM 5219", "ECN-2", "SAFETY FILM"],
+      edgePresets120: ["EASTMAN", "ECN-2", "SAFETY FILM"],
       frameNumberStyle: "N",
     },
   };
@@ -123,7 +129,7 @@
     { id: "lucky-c200", name: "Lucky C200 乐凯彩色负片", edgeText: "LUCKY C200", process: "C-41" },
     { id: "fujichrome-velvia-50", name: "Fujichrome Velvia 50", edgeText: "FUJICHROME VELVIA 50", process: "E-6" },
     { id: "fujichrome-provia-100f", name: "Fujichrome Provia 100F", edgeText: "FUJICHROME PROVIA 100F", process: "E-6" },
-    { id: "cinestill-800t", name: "CineStill 800T", edgeText: "CINESTILL 800T", process: "ECN-2" },
+    { id: "cinestill-800t", name: "CineStill 800T", edgeText: "CINESTILL 800T", process: "ECN-2", sprocketsIn120: true },
     { id: "lomography-color-400", name: "Lomography Color 400", edgeText: "LOMOGRAPHY COLOR 400", process: "C-41" },
   ].map((stock) => ({ ...stock, builtin: true }));
 
@@ -142,6 +148,8 @@
     fontSize: 0.86, // 字号 / 边字带高度
     textOffsetY: 0.38, // 边字中线到胶片外缘的距离 / 边字带高度（真实底片边字几乎贴着片边）
     textSprocketGap: 0.022, // 齿孔带向边字方向收紧的距离 / frameW（越大边字与齿孔离得越近）
+    band120: 0.07, // 120 边字带高度 / 画幅高（真实上下留边各约 2.75mm / 56mm）
+    gap120: 0.035, // 120 帧间隙 / 画幅高（真实约 2mm，帧几乎相贴）
   };
 
   // 浏览器 canvas 尺寸安全上限（保守取值，超出后 toBlob 会得到 null）
@@ -420,7 +428,12 @@
   }
 
   function isHalfFrameMode() {
-    return frameAspect.value === "0.75";
+    return Boolean(getFormat().half);
+  }
+
+  // 120 中画幅：由 FORMATS 表的 medium 标志判断（6×6 / 6×4.5 / 6×7 / 6×9）
+  function is120Format() {
+    return Boolean(getFormat().medium);
   }
 
   function getHalfFrameInputMode() {
@@ -431,9 +444,26 @@
     return isHalfFrameMode() && getHalfFrameInputMode() === "cropped";
   }
 
+  // 画幅格式表：ratio 为槽位宽高比；medium 标记 120 中画幅并锁定每行张数；
+  // portrait 标记竖幅槽位（645 真实帧为 41.5×56mm 竖幅，横图自动旋转进槽）
+  const FORMATS = {
+    "135": { ratio: 1.5 },
+    half: { ratio: 0.75, half: true },
+    "645": { ratio: 41.5 / 56, medium: true, columns: 4, portrait: true },
+    "66": { ratio: 1, medium: true, columns: 3 },
+    "67": { ratio: 69.5 / 56, medium: true, columns: 2 },
+    "69": { ratio: 84 / 56, medium: true, columns: 2 },
+    xpan: { ratio: 65 / 24 },
+  };
+
+  function getFormat() {
+    return FORMATS[frameAspect.value] || FORMATS["135"];
+  }
+
   function updateFrameModeControls() {
     const halfFrame = isHalfFrameMode();
     const cropped = isCroppedHalfFrameMode();
+    const format120 = is120Format();
     halfFrameModeField.hidden = !halfFrame;
     columnsSelect.disabled = cropped;
     if (columnsHint) {
@@ -443,6 +473,34 @@
           ? "每个文件按一张包含两格的横向扫描图处理"
           : "";
       columnsHint.hidden = !halfFrame;
+    }
+    // 120 画幅：按格式表锁定每行张数
+    if (format120 && !halfFrame) {
+      const defaultCols = getFormat().columns;
+      if (defaultCols) columnsSelect.value = String(defaultCols);
+      columnsSelect.disabled = true;
+      if (columnsHint) {
+        columnsHint.textContent = `120 画幅固定每行 ${defaultCols || "?"} 张`;
+        columnsHint.hidden = false;
+      }
+    }
+    // 120 画幅：隐藏片头片尾选项
+    showLeader.disabled = format120;
+    if (format120) showLeader.checked = false;
+    if (leaderHint) {
+      leaderHint.textContent = format120 ? "120 胶片无片头片尾" : "";
+      leaderHint.hidden = !format120;
+    }
+    // 120 画幅：非 ECN-2 型号无齿孔，禁用复选框并提示
+    const stock = resolveStock(getActiveStock());
+    const sprocketsLocked = format120 && !stock.sprocketsIn120;
+    showSprockets.disabled = sprocketsLocked;
+    if (sprocketsLocked) showSprockets.checked = false;
+    if (sprocketsHint) {
+      sprocketsHint.textContent = sprocketsLocked
+        ? "120 画幅默认无齿孔，仅电影卷（ECN-2）保留"
+        : "";
+      sprocketsHint.hidden = !sprocketsLocked;
     }
   }
 
@@ -534,7 +592,8 @@
   }
 
   function targetPortraitMode() {
-    return isCroppedHalfFrameMode();
+    // 裁切半格与 645 竖幅槽位都需要竖向源图（645 横拍照片像真底片一样转竖进槽）
+    return isCroppedHalfFrameMode() || Boolean(getFormat().portrait);
   }
 
   async function rebuildItemSource(item, generation, editVersion) {
@@ -781,15 +840,20 @@
 
   function getRenderOptions(scale) {
     const baseFrameW = clamp(Number(frameWidthInput.value) || 420, 180, 1200) * scale;
-    const ratio = Number(frameAspect.value) || 1.5;
+    const format = getFormat();
+    const ratio = format.ratio || 1.5;
+    const is120 = Boolean(format.medium);
     const isHalfFrame = isHalfFrameMode();
     const isCroppedHalfFrame = isCroppedHalfFrameMode();
     const baseFrameH = Math.round(baseFrameW / 1.5);
-    const normalGap = Math.max(10 * scale, Math.round(baseFrameW * 0.045));
-    const selectedColumns = clamp(Number(columnsSelect.value) || 6, 3, 8);
+    const slotH = isHalfFrame ? baseFrameH : Math.round(baseFrameW / ratio);
+    // 120 帧间隙按真实底片取窄值（≈2mm / 56mm 画幅高，帧几乎相贴）；135 维持原有间隙
+    const normalGap = is120
+      ? Math.round(slotH * TUNE.gap120)
+      : Math.max(10 * scale, Math.round(baseFrameW * 0.045));
+    const selectedColumns = clamp(Number(columnsSelect.value) || 6, 2, 8);
     const slotCount = isCroppedHalfFrame ? 12 : selectedColumns;
     const slotW = isCroppedHalfFrame ? baseFrameW / 2 : baseFrameW;
-    const slotH = isHalfFrame ? baseFrameH : Math.round(baseFrameW / ratio);
     const normalSixFrameAreaW = 6 * baseFrameW + 5 * normalGap;
     const slotGap = isCroppedHalfFrame
       ? (normalSixFrameAreaW - slotCount * slotW) / (slotCount - 1)
@@ -801,16 +865,42 @@
     // 型号 edgeText 为空表示底片无边字：只跳过边字绘制，边字带仍照常占位，布局与有边字时一致
     const stock = resolveStock(getActiveStock());
     const hasEdgeText = showEdgeText.checked && Boolean(stock.edgeText);
+    // 120 画幅：仅 ECN-2 电影卷保留齿孔；135 画幅由复选框控制
+    const showSprocketHoles = showSprockets.checked && (!is120 || stock.sprocketsIn120);
 
     // 上下带分为两个不重叠的分区：外侧边字带 + 内侧齿孔带（边字印在齿孔外缘）
-    const sprocketH = showSprockets.checked ? Math.round(baseFrameW * TUNE.sprocketH) : 0;
-    const textH = showEdgeText.checked ? Math.round(baseFrameW * TUNE.textH) : 0;
-    // 齿孔带向外缘方向收紧，让齿孔更贴近边字（仅两者都显示时生效）
-    const textSprocketShift =
-      sprocketH && textH ? Math.min(Math.round(baseFrameW * TUNE.textSprocketGap), textH) : 0;
-    const bandH = Math.max(sprocketH + textH - textSprocketShift, Math.round(baseFrameW * 0.055));
+    let sprocketH;
+    let textH;
+    let textSprocketShift;
+    let bandH;
+    let stripPadX;
+    let sprocketPitch;
+    let sprocketHoleW;
+    if (is120) {
+      // 120：上下留边极窄（真实各约 2.75mm，对 56mm 画幅高≈5%），所有比例以画幅高 slotH 为基准，
+      // 四种 120 画幅共享同一物理片宽
+      sprocketH = showSprocketHoles ? Math.round(slotH * 0.09) : 0;
+      textH = showEdgeText.checked ? Math.round(slotH * TUNE.band120) : 0;
+      textSprocketShift = 0;
+      // 关掉边字后窄黑留边（物理 rebate）仍占位
+      bandH = Math.max(sprocketH + textH, Math.round(slotH * 0.05));
+      stripPadX = Math.round(slotH * 0.05);
+      // 齿孔节距按 135 物理孔距 4.75mm 对 56mm 画幅高换算（仅 ECN-2 电影卷可见）
+      sprocketPitch = slotH * (4.75 / 56);
+      sprocketHoleW = Math.round(slotH * (2.8 / 56));
+    } else {
+      sprocketH = showSprocketHoles ? Math.round(baseFrameW * TUNE.sprocketH) : 0;
+      textH = showEdgeText.checked ? Math.round(baseFrameW * TUNE.textH) : 0;
+      // 齿孔带向外缘方向收紧，让齿孔更贴近边字（仅两者都显示时生效）
+      textSprocketShift =
+        sprocketH && textH ? Math.min(Math.round(baseFrameW * TUNE.textSprocketGap), textH) : 0;
+      bandH = Math.max(sprocketH + textH - textSprocketShift, Math.round(baseFrameW * 0.055));
+      stripPadX = Math.round(baseFrameW * 0.085);
+      // 按 135 规格连续排列齿孔：孔距≈4.75mm，对应画幅宽 38mm 的 1/8
+      sprocketPitch = baseFrameW * 0.125;
+      sprocketHoleW = Math.round(baseFrameW * TUNE.holeW);
+    }
 
-    const stripPadX = Math.round(baseFrameW * 0.085);
     const sheetPad = Math.round(baseFrameW * 0.18);
     const rowGap = Math.round(baseFrameW * 0.14);
 
@@ -826,23 +916,28 @@
       slotGap,
       slotCount,
       frameAreaW,
+      // 120 边字按帧对齐（slotW === baseFrameW、slotGap === normalGap），与 135 的独立物理节距共用同一字段
       edgeMarkW: baseFrameW,
       edgeMarkGap: normalGap,
       edgeMarkSlotSpan: isCroppedHalfFrame ? 2 : 1,
       isHalfFrame,
       isCroppedHalfFrame,
+      is120,
       leaderSlots: isCroppedHalfFrame ? 2 : 1,
       bandH,
       sprocketH,
       textH,
       textSprocketShift,
+      sprocketPitch,
+      sprocketHoleW,
       stripPadX,
       sheetPad,
       rowGap,
       columns: slotCount,
       showEdgeText: hasEdgeText,
-      showSprockets: showSprockets.checked,
-      showLeader: showLeader.checked,
+      showSprockets: showSprocketHoles,
+      // 120 胶片无片头片尾
+      showLeader: showLeader.checked && !is120,
       // 片头舌保持普通 135 单格宽；半格下占两个半格槽位
       leaderW: baseFrameW + normalGap,
       leaderAdvance: isCroppedHalfFrame ? 2 * (slotW + slotGap) : baseFrameW + normalGap,
@@ -981,8 +1076,13 @@
     }
 
     if (options.showEdgeText) {
-      drawEdgeTextTop(x, y, stripW, rowInfo, rowIndex, options);
-      drawEdgeTextBottom(x, y + stripH - options.textH, stripW, rowInfo, options);
+      if (options.is120) {
+        drawEdgeTextTop120(x, y, stripW, rowInfo, options);
+        drawEdgeTextBottom120(x, y + stripH - options.textH, stripW, rowInfo, rowIndex, options);
+      } else {
+        drawEdgeTextTop(x, y, stripW, rowInfo, rowIndex, options);
+        drawEdgeTextBottom(x, y + stripH - options.textH, stripW, rowInfo, options);
+      }
     }
 
     const frameStartX = x + options.stripPadX;
@@ -1022,7 +1122,10 @@
 
   // 构建胶片条轮廓：普通行是圆角矩形；片头行左端是半宽片舌（上半条裁掉，舌落在下半）；片尾行右端是剪刀切口
   function buildStripPath(x, y, stripW, stripH, rowInfo, options) {
-    const r = Math.max(6, Math.round(options.frameW * 0.015));
+    // 120 条带是平切端头，圆角取极小值
+    const r = options.is120
+      ? Math.max(2, Math.round(options.frameW * 0.004))
+      : Math.max(6, Math.round(options.frameW * 0.015));
     const xr = x + stripW;
 
     ctx.beginPath();
@@ -1172,11 +1275,11 @@
     ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
   }
 
-  // 按 135 规格连续排列齿孔：孔距≈4.75mm，对应画幅宽 38mm 的 1/8
+  // 齿孔节距与孔宽由 getRenderOptions 按画幅派生（135 按孔距 4.75mm≈画幅宽 1/8；120 仅 ECN-2 电影卷可见）
   // minX/maxX：只画完整落在 [minX, maxX] 区间内的孔（片头行用来避开舌部切口弧线），不改变孔距相位
   function drawSprockets(x, zoneY, stripW, options, minX = null, maxX = null) {
-    const pitch = options.frameW * 0.125;
-    const holeW = Math.round(options.frameW * TUNE.holeW);
+    const pitch = options.sprocketPitch;
+    const holeW = options.sprocketHoleW;
     const holeH = Math.round(options.sprocketH * TUNE.holeH);
     const holeY = zoneY + Math.round((options.sprocketH - holeH) / 2);
     const holeR = Math.max(2, Math.round(holeW * 0.28));
@@ -1298,6 +1401,83 @@
         Math.round(fontSize * 0.32),
         Math.round(fontSize * 0.32),
       );
+    });
+    ctx.restore();
+  }
+
+  // 120 上边字：按帧对齐 —— 帧左「型号字样」、帧右大号帧号、右角品牌词（对齐 Ektar 66 参考）
+  function drawEdgeTextTop120(x, zoneY, stripW, rowInfo, options) {
+    const { font } = edgeFont(options);
+    const numberFont = edgeFont(options, 1.15).font;
+    const baseline = zoneY + Math.round(options.textH * 0.52);
+    const brand = options.stock.edgeText.split(" ")[0] || "";
+    const marks = getEdgeMarkLayout(x, stripW, rowInfo, options);
+
+    ctx.save();
+    ctx.textBaseline = "middle";
+    setEdgeInk(options);
+
+    marks.forEach((mark) => {
+      ctx.font = font;
+      ctx.textAlign = "left";
+      ctx.fillText(options.stock.edgeText, mark.x + Math.round(options.edgeMarkW * 0.02), baseline, options.edgeMarkW * 0.6);
+      ctx.font = numberFont;
+      ctx.fillText(`${mark.index + 1}`, mark.x + Math.round(options.edgeMarkW * 0.7), baseline);
+      if (brand) {
+        ctx.font = font;
+        ctx.textAlign = "right";
+        ctx.fillText(brand, mark.x + options.edgeMarkW, baseline, options.edgeMarkW * 0.22);
+      }
+    });
+    ctx.restore();
+  }
+
+  // 120 下边字：按帧对齐 —— ▶箭头 + 帧号，隔帧交替字样，右段 DX 条码刻线簇（对齐 645 Fuji 参考）
+  function drawEdgeTextBottom120(x, zoneY, stripW, rowInfo, rowIndex, options) {
+    const { fontSize, font } = edgeFont(options);
+    const baseline = zoneY + Math.round(options.textH * 0.52);
+    const presets = options.stock.edgePresets120;
+    const preset = presets[rowIndex % presets.length];
+    const marks = getEdgeMarkLayout(x, stripW, rowInfo, options);
+
+    ctx.save();
+    ctx.font = font;
+    ctx.textBaseline = "middle";
+    setEdgeInk(options);
+
+    marks.forEach((mark, index) => {
+      // 实心三角箭头（canvas path 而非 ▶ 字符，避免字体差异）
+      const triW = Math.round(fontSize * 0.55);
+      const triH = Math.round(fontSize * 0.5);
+      const triX = mark.x + Math.round(options.edgeMarkW * 0.03);
+      ctx.beginPath();
+      ctx.moveTo(triX, baseline - triH / 2);
+      ctx.lineTo(triX + triW, baseline);
+      ctx.lineTo(triX, baseline + triH / 2);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.textAlign = "left";
+      ctx.fillText(`${mark.index + 1}`, triX + triW + Math.round(fontSize * 0.3), baseline);
+
+      // 隔帧印一条 120 交替字样（120 / SAFETY FILM 等）
+      if (index % 2 === 1) {
+        ctx.fillText(preset, mark.x + Math.round(options.edgeMarkW * 0.34), baseline, options.edgeMarkW * 0.32);
+      }
+
+      // DX 条码刻线簇：粗细与间隔由确定性伪随机决定，保证预览与导出一致
+      const barZoneX = mark.x + options.edgeMarkW * 0.72;
+      const barZoneW = options.edgeMarkW * 0.24;
+      const barH = Math.round(options.textH * 0.55);
+      const barY = baseline - Math.round(barH / 2);
+      const barCount = 14;
+      let bx = barZoneX;
+      for (let i = 0; i < barCount && bx < barZoneX + barZoneW; i += 1) {
+        const seed = mark.index * 197 + i * 13;
+        const barW = Math.max(1, Math.round(fontSize * (0.05 + deterministicNoise(seed) * 0.1)));
+        ctx.fillRect(Math.round(bx), barY, barW, barH);
+        bx += barW + Math.max(1, Math.round(fontSize * (0.06 + deterministicNoise(seed + 7) * 0.12)));
+      }
     });
     ctx.restore();
   }
@@ -1828,7 +2008,10 @@
         Array.isArray(stock.edgePresets) && stock.edgePresets.length
           ? stock.edgePresets
           : defaults.edgePresets,
+      // 120 交替字样不开放自定义，一律随工艺默认
+      edgePresets120: defaults.edgePresets120,
       frameNumberStyle: stock.frameNumberStyle || defaults.frameNumberStyle,
+      sprocketsIn120: Boolean(stock.sprocketsIn120),
     };
   }
 
@@ -1861,6 +2044,9 @@
     }
     if (raw.frameNumberStyle === "N/NA" || raw.frameNumberStyle === "N") {
       stock.frameNumberStyle = raw.frameNumberStyle;
+    }
+    if (raw.sprocketsIn120 === true) {
+      stock.sprocketsIn120 = true;
     }
     return stock;
   }
@@ -2055,6 +2241,7 @@
       state.stockId = stockSelect.value;
       persistStocks();
       fillStockForm(getActiveStock());
+      updateFrameModeControls();
       scheduleRender();
     });
 
@@ -2115,6 +2302,8 @@
       { key: "fontSize", label: "字号 (×边字带)", min: 0.4, max: 1.2, step: 0.02 },
       { key: "textOffsetY", label: "边字到片边距离 (×边字带)", min: 0.2, max: 0.8, step: 0.02 },
       { key: "textSprocketGap", label: "齿孔向边字收紧 (×frameW)", min: 0, max: 0.05, step: 0.002 },
+      { key: "band120", label: "120 边带高度 (×画幅高)", min: 0.04, max: 0.12, step: 0.002 },
+      { key: "gap120", label: "120 帧间隙 (×画幅高)", min: 0.015, max: 0.08, step: 0.002 },
     ];
     const defaults = { ...TUNE };
 
