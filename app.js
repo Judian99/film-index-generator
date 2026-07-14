@@ -1,3 +1,16 @@
+/**
+ * 海带索引图 FILM - 胶片索引图生成器
+ *
+ * 作者: Judian99
+ * 小红书: 3661182800
+ * 抖音: 69530829181
+ * 邮箱: 1946378724@qq.com
+ * GitHub: https://github.com/Judian99/film-index-generator
+ * 许可证: MIT
+ *
+ * 图片只在浏览器本地处理，不上传服务器。
+ */
+
 (function () {
   const fileInput = document.getElementById("fileInput");
   const dropZone = document.getElementById("dropZone");
