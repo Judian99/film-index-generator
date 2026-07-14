@@ -64,6 +64,7 @@
   const cropOverlay = document.getElementById("cropOverlay");
   const cropClose = document.getElementById("cropClose");
   const cropCancel = document.getElementById("cropCancel");
+  const cropReset = document.getElementById("cropReset");
   const cropApply = document.getElementById("cropApply");
   const filmStage = document.getElementById("filmStage");
   const filmTitle = document.getElementById("filmTitle");
@@ -1864,23 +1865,46 @@
     const cropCtx = cropCanvas.getContext("2d");
     cropCtx.drawImage(item.source, 0, 0, displayW, displayH);
 
-    // 初始裁切区域占 80% 居中
-    const cropW = Math.round(displayW * 0.8);
-    const cropH = Math.round(displayH * 0.8);
-    const cropX = Math.round((displayW - cropW) / 2);
-    const cropY = Math.round((displayH - cropH) / 2);
+    // 计算初始裁切区域,保持当前底片画幅比例
+    const aspectRatio = getFormat().ratio;
+    let cropW, cropH, cropX, cropY;
+
+    if (aspectRatio >= 1) {
+      // 横图或方图
+      cropH = Math.round(displayH * 0.8);
+      cropW = Math.round(cropH * aspectRatio);
+      if (cropW > displayW) {
+        cropW = displayW;
+        cropH = Math.round(cropW / aspectRatio);
+      }
+    } else {
+      // 竖图
+      cropW = Math.round(displayW * 0.8);
+      cropH = Math.round(cropW / aspectRatio);
+      if (cropH > displayH) {
+        cropH = displayH;
+        cropW = Math.round(cropH * aspectRatio);
+      }
+    }
+    cropX = Math.round((displayW - cropW) / 2);
+    cropY = Math.round((displayH - cropH) / 2);
 
     state.cropState = {
       itemId,
-      scale,
       displayW,
       displayH,
       cropX,
       cropY,
       cropW,
       cropH,
+      aspectRatio,
       editVersion: item.editVersion,
       drag: null,
+      // 保存初始状态用于重置
+      initialCropX: cropX,
+      initialCropY: cropY,
+      initialCropW: cropW,
+      initialCropH: cropH,
     };
 
     updateCropOverlay();
@@ -1894,21 +1918,38 @@
 
   function updateCropOverlay() {
     if (!state.cropState) return;
-    const { cropX, cropY, cropW, cropH } = state.cropState;
-    cropOverlay.style.left = `${cropX}px`;
-    cropOverlay.style.top = `${cropY}px`;
-    cropOverlay.style.width = `${cropW}px`;
-    cropOverlay.style.height = `${cropH}px`;
+    const { cropX, cropY, cropW, cropH, displayW, displayH } = state.cropState;
+    const canvasRect = cropCanvas.getBoundingClientRect();
+    const wrapRect = cropCanvas.parentElement.getBoundingClientRect();
+    const scaleX = canvasRect.width / displayW;
+    const scaleY = canvasRect.height / displayH;
+    const originX = canvasRect.left - wrapRect.left;
+    const originY = canvasRect.top - wrapRect.top;
+
+    cropOverlay.style.left = `${originX + cropX * scaleX}px`;
+    cropOverlay.style.top = `${originY + cropY * scaleY}px`;
+    cropOverlay.style.width = `${cropW * scaleX}px`;
+    cropOverlay.style.height = `${cropH * scaleY}px`;
   }
 
   cropOverlay.addEventListener("pointerdown", (event) => {
     if (!state.cropState) return;
     event.preventDefault();
 
+    // 标记正在拖拽,防止误触发关闭
+    state.cropState.isDragging = false;
+
     const rect = cropCanvas.getBoundingClientRect();
+    // 保存 canvas 渲染尺寸信息
+    const renderW = rect.width;
+    const renderH = rect.height;
+    const { displayW, displayH } = state.cropState;
+
     const startX = event.clientX;
     const startY = event.clientY;
     const { cropX, cropY, cropW, cropH } = state.cropState;
+    // 最小尺寸为图片较小边的 10%
+    const minSize = Math.min(displayW, displayH) * 0.1;
 
     let mode = "move";
     if (event.target.classList.contains("crop-handle")) {
@@ -1918,41 +1959,65 @@
       else if (event.target.classList.contains("se")) mode = "se";
     }
 
-    state.cropState.drag = { mode, startX, startY, startCropX: cropX, startCropY: cropY, startCropW: cropW, startCropH: cropH };
+    state.cropState.drag = {
+      mode,
+      startX,
+      startY,
+      startCropX: cropX,
+      startCropY: cropY,
+      startCropW: cropW,
+      startCropH: cropH,
+      // 保存缩放比例
+      scaleX: displayW / renderW,
+      scaleY: displayH / renderH,
+    };
 
     const onMove = (e) => {
       if (!state.cropState || !state.cropState.drag) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      const { mode, startCropX, startCropY, startCropW, startCropH } = state.cropState.drag;
-      const { displayW, displayH } = state.cropState;
+      // 标记正在拖拽
+      state.cropState.isDragging = true;
+
+      // 计算鼠标在 canvas 渲染坐标系中的移动量
+      const dxRender = e.clientX - startX;
+      const dyRender = e.clientY - startY;
+
+      const { mode, startCropX, startCropY, startCropW, startCropH, scaleX, scaleY } = state.cropState.drag;
+      const { displayW, displayH, aspectRatio } = state.cropState;
+
+      // 将渲染坐标移动量转换为内部像素坐标移动量
+      const dx = dxRender * scaleX;
+      const dy = dyRender * scaleY;
 
       if (mode === "move") {
         state.cropState.cropX = clamp(startCropX + dx, 0, displayW - cropW);
         state.cropState.cropY = clamp(startCropY + dy, 0, displayH - cropH);
       } else {
-        let newX = startCropX;
-        let newY = startCropY;
-        let newW = startCropW;
-        let newH = startCropH;
+        const anchors = {
+          nw: [startCropX + startCropW, startCropY + startCropH, -1, -1],
+          ne: [startCropX, startCropY + startCropH, 1, -1],
+          sw: [startCropX + startCropW, startCropY, -1, 1],
+          se: [startCropX, startCropY, 1, 1],
+        };
+        const [anchorX, anchorY, directionX, directionY] = anchors[mode];
+        const pointerX = startCropX + (mode.includes("w") ? 0 : startCropW) + dx;
+        const pointerY = startCropY + (mode.includes("n") ? 0 : startCropH) + dy;
+        const projectedH = (
+          directionX * aspectRatio * (pointerX - anchorX) +
+          directionY * (pointerY - anchorY)
+        ) / (aspectRatio * aspectRatio + 1);
+        const maxH = Math.min(
+          directionY < 0 ? anchorY : displayH - anchorY,
+          (directionX < 0 ? anchorX : displayW - anchorX) / aspectRatio,
+        );
+        const minH = Math.min(
+          maxH,
+          minSize / Math.min(1, aspectRatio),
+        );
+        const newH = clamp(projectedH, minH, maxH);
+        const newW = newH * aspectRatio;
 
-        if (mode.includes("n")) {
-          newY = clamp(startCropY + dy, 0, startCropY + startCropH - 50);
-          newH = startCropY + startCropH - newY;
-        }
-        if (mode.includes("s")) {
-          newH = clamp(startCropH + dy, 50, displayH - startCropY);
-        }
-        if (mode.includes("w")) {
-          newX = clamp(startCropX + dx, 0, startCropX + startCropW - 50);
-          newW = startCropX + startCropW - newX;
-        }
-        if (mode.includes("e")) {
-          newW = clamp(startCropW + dx, 50, displayW - startCropX);
-        }
-
-        state.cropState.cropX = newX;
-        state.cropState.cropY = newY;
+        state.cropState.cropX = directionX < 0 ? anchorX - newW : anchorX;
+        state.cropState.cropY = directionY < 0 ? anchorY - newH : anchorY;
         state.cropState.cropW = newW;
         state.cropState.cropH = newH;
       }
@@ -1962,6 +2027,12 @@
 
     const onEnd = () => {
       if (state.cropState) state.cropState.drag = null;
+      // 延迟清除拖拽标志,避免 pointerup 后的 click 事件触发关闭
+      setTimeout(() => {
+        if (state.cropState) {
+          state.cropState.isDragging = false;
+        }
+      }, 10);
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onEnd);
     };
@@ -1972,9 +2043,22 @@
 
   cropClose.addEventListener("click", closeCropModal);
   cropCancel.addEventListener("click", closeCropModal);
+  cropReset.addEventListener("click", () => {
+    if (!state.cropState) return;
+    // 恢复到初始裁剪区域
+    state.cropState.cropX = state.cropState.initialCropX;
+    state.cropState.cropY = state.cropState.initialCropY;
+    state.cropState.cropW = state.cropState.initialCropW;
+    state.cropState.cropH = state.cropState.initialCropH;
+    updateCropOverlay();
+  });
 
   // 点击背景关闭裁切模态框
   cropModal.addEventListener("click", (event) => {
+    // 如果正在拖拽,不关闭(防止拖拽到背景区域后释放鼠标触发关闭)
+    if (state.cropState && state.cropState.isDragging) {
+      return;
+    }
     if (event.target === cropModal || event.target.classList.contains("crop-backdrop")) {
       closeCropModal();
     }
@@ -1982,7 +2066,7 @@
 
   cropApply.addEventListener("click", async () => {
     if (!state.cropState) return;
-    const { itemId, scale, cropX, cropY, cropW, cropH, editVersion } = state.cropState;
+    const { itemId, displayW, displayH, cropX, cropY, cropW, cropH, editVersion } = state.cropState;
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item || item.editVersion !== editVersion) {
       closeCropModal();
@@ -1990,10 +2074,14 @@
       return;
     }
 
-    const realX = Math.round(cropX / scale);
-    const realY = Math.round(cropY / scale);
-    const realW = Math.round(cropW / scale);
-    const realH = Math.round(cropH / scale);
+    const sourceW = item.width;
+    const sourceH = item.height;
+    const realX = Math.round(cropX * sourceW / displayW);
+    const realY = Math.round(cropY * sourceH / displayH);
+    const realRight = Math.round((cropX + cropW) * sourceW / displayW);
+    const realBottom = Math.round((cropY + cropH) * sourceH / displayH);
+    const realW = Math.max(1, realRight - realX);
+    const realH = Math.max(1, realBottom - realY);
     const canvas = document.createElement("canvas");
     canvas.width = realW;
     canvas.height = realH;
