@@ -129,24 +129,62 @@
   const PROCESS_NAMES = Object.keys(PROCESS_DEFAULTS);
 
   const BUILTIN_STOCKS = [
-    { id: "kodak-portra-160", name: "Kodak Portra 160", edgeText: "KODAK PORTRA 160", process: "C-41" },
+    // Kodak 彩色负片
     { id: "kodak-portra-400", name: "Kodak Portra 400", edgeText: "KODAK PORTRA 400", process: "C-41" },
     { id: "kodak-portra-800", name: "Kodak Portra 800", edgeText: "KODAK PORTRA 800", process: "C-41" },
     { id: "kodak-gold-200", name: "Kodak Gold 200", edgeText: "KODAK GOLD 200", process: "C-41" },
     { id: "kodak-colorplus-200", name: "Kodak ColorPlus 200", edgeText: "KODAK COLORPLUS 200", process: "C-41" },
     { id: "kodak-ultramax-400", name: "Kodak UltraMax 400", edgeText: "KODAK ULTRAMAX 400", process: "C-41" },
     { id: "kodak-ektar-100", name: "Kodak Ektar 100", edgeText: "KODAK EKTAR 100", process: "C-41" },
+
+    // Kodak 黑白胶片
     { id: "kodak-tri-x-400", name: "Kodak Tri-X 400", edgeText: "KODAK TRI-X 400", process: "BW" },
+    { id: "kodak-tmax-100", name: "Kodak T-Max 100", edgeText: "KODAK T-MAX 100", process: "BW" },
+    { id: "kodak-tmax-400", name: "Kodak T-Max 400", edgeText: "KODAK T-MAX 400", process: "BW" },
+    { id: "kodak-px-125", name: "Kodak P3200", edgeText: "KODAK P3200", process: "BW" },
+
+    // Fujifilm 彩色负片
+    { id: "fujifilm-400", name: "Fujifilm 400", edgeText: "FUJIFILM 400", process: "C-41" },
+    { id: "fujifilm-c400", name: "Fujifilm C400", edgeText: "FUJIFILM C400", process: "C-41" },
+    { id: "fujicolor-c200", name: "Fujicolor C200", edgeText: "FUJICOLOR C200", process: "C-41" },
+    { id: "fujifilm-superia-400", name: "Fujifilm Superia 400", edgeText: "FUJIFILM SUPERIA 400", process: "C-41" },
+
+    // Fujifilm 反转片
+    { id: "fujichrome-velvia-50", name: "Fujichrome Velvia 50", edgeText: "FUJICHROME VELVIA 50", process: "E-6" },
+    { id: "fujichrome-provia-100f", name: "Fujichrome Provia 100F", edgeText: "FUJICHROME PROVIA 100F", process: "E-6" },
+
+    // Ilford 黑白胶片
     { id: "ilford-hp5-plus-400", name: "Ilford HP5 Plus 400", edgeText: "ILFORD HP5 PLUS 400", process: "BW" },
     { id: "ilford-fp4-plus-125", name: "Ilford FP4 Plus 125", edgeText: "ILFORD FP4 PLUS 125", process: "BW" },
     { id: "ilford-delta-400", name: "Ilford Delta 400", edgeText: "ILFORD DELTA 400", process: "BW" },
-    { id: "fujifilm-400", name: "Fujifilm 400", edgeText: "FUJIFILM 400", process: "C-41" },
-    { id: "fujicolor-c200", name: "Fujicolor C200", edgeText: "FUJICOLOR C200", process: "C-41" },
-    { id: "lucky-c200", name: "Lucky C200 乐凯彩色负片", edgeText: "LUCKY C200", process: "C-41" },
-    { id: "fujichrome-velvia-50", name: "Fujichrome Velvia 50", edgeText: "FUJICHROME VELVIA 50", process: "E-6" },
-    { id: "fujichrome-provia-100f", name: "Fujichrome Provia 100F", edgeText: "FUJICHROME PROVIA 100F", process: "E-6" },
+    { id: "ilford-delta-100", name: "Ilford Delta 100", edgeText: "ILFORD DELTA 100", process: "BW" },
+    { id: "ilford-delta-3200", name: "Ilford Delta 3200", edgeText: "ILFORD DELTA 3200", process: "BW" },
+    { id: "ilford-pan-f-plus-50", name: "Ilford Pan F Plus 50", edgeText: "ILFORD PAN F PLUS 50", process: "BW" },
+    { id: "ilford-xp2-super", name: "Ilford XP2 Super", edgeText: "ILFORD XP2 SUPER", process: "C-41" },
+
+    // Harman 彩色负片
+    { id: "harman-phoenix-200", name: "Harman Phoenix Ⅱ 200", edgeText: "HARMAN PHOENIX Ⅱ 200", process: "C-41", edgePresets: ["HARMAN PHOENIX Ⅱ 200"] },
+
+    // 电影卷
     { id: "cinestill-800t", name: "CineStill 800T", edgeText: "CINESTILL 800T", process: "ECN-2", sprocketsIn120: true },
+    { id: "cinestill-50d", name: "CineStill 50D", edgeText: "CINESTILL 50D", process: "ECN-2", sprocketsIn120: true },
+    { id: "cinestill-400d", name: "CineStill 400D", edgeText: "CINESTILL 400D", process: "ECN-2", sprocketsIn120: true },
+
+    // Foma 黑白胶片
+    { id: "fomapan-100", name: "Fomapan 100", edgeText: "FOMAPAN 100", process: "BW" },
+    { id: "fomapan-200", name: "Fomapan 200", edgeText: "FOMAPAN 200", process: "BW" },
+    { id: "fomapan-400", name: "FOMAPAN 400", edgeText: "FOMAPAN 400", process: "BW" },
+
+    // 乐凯
+    { id: "lucky-c200", name: "Lucky C200 乐凯彩色负片", edgeText: "LUCKY C200", process: "C-41" },
+    { id: "lucky-shd-100", name: "Lucky SHD 100 乐凯黑白", edgeText: "LUCKY SHD 100", process: "BW" },
+
+    // Lomography
     { id: "lomography-color-400", name: "Lomography Color 400", edgeText: "LOMOGRAPHY COLOR 400", process: "C-41" },
+    { id: "lomography-color-800", name: "Lomography Color 800", edgeText: "LOMOGRAPHY COLOR 800", process: "C-41" },
+
+    // 其他
+    { id: "kentmere-400", name: "Kentmere 400", edgeText: "KENTMERE 400", process: "BW" },
   ].map((stock) => ({ ...stock, builtin: true }));
 
   const DEFAULT_STOCK_ID = "kodak-portra-400";
@@ -2158,6 +2196,19 @@
     }
     // id 序号避开已恢复的自定义型号，防止新 id 与旧数据撞名
     state.nextStockSeq = state.customStocks.length + 1;
+
+    // 迁移已合并到内置型号的自定义型号
+    const builtinIds = new Set(BUILTIN_STOCKS.map((s) => s.id));
+    const mergedStocks = state.customStocks.filter((s) => !builtinIds.has(s.id));
+    if (mergedStocks.length !== state.customStocks.length) {
+      state.customStocks = mergedStocks;
+      try {
+        localStorage.setItem(STORAGE_STOCKS_KEY, JSON.stringify(state.customStocks));
+      } catch (error) {
+        // 忽略存储错误
+      }
+    }
+
     const selected = localStorage.getItem(STORAGE_SELECTED_KEY);
     state.stockId = findStock(selected) ? selected : DEFAULT_STOCK_ID;
   }
