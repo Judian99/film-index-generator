@@ -1,11 +1,4 @@
 (function () {
-  const uiModeParam = new URLSearchParams(window.location.search).get("ui");
-  const uiMode = uiModeParam === "film-demo" ? "film-demo" : "classic";
-  document.body.dataset.uiMode = uiMode;
-  document.querySelectorAll("[data-ui-link]").forEach((link) => {
-    if (link.dataset.uiLink === uiMode) link.setAttribute("aria-current", "page");
-  });
-
   const fileInput = document.getElementById("fileInput");
   const dropZone = document.getElementById("dropZone");
   const previewWrap = document.getElementById("previewWrap");
@@ -59,10 +52,9 @@
   const cropClose = document.getElementById("cropClose");
   const cropCancel = document.getElementById("cropCancel");
   const cropApply = document.getElementById("cropApply");
-  const filmDemoStage = document.getElementById("filmDemoStage");
-  const filmDemoControls = document.getElementById("filmDemoControls");
-  const filmDemoTitle = document.getElementById("filmDemoTitle");
-  const filmDemoDescription = document.getElementById("filmDemoDescription");
+  const filmStage = document.getElementById("filmStage");
+  const filmTitle = document.getElementById("filmTitle");
+  const filmDescription = document.getElementById("filmDescription");
 
   let activeCanvas = previewCanvas;
   let ctx = previewCanvas.getContext("2d");
@@ -168,73 +160,31 @@
   const MAX_CANVAS_SIDE = 16384;
   const MAX_CANVAS_AREA = 16384 * 16384;
 
-  const demoScenes = {
+  const filmStageStates = {
     intro: {
       title: "装入你的底片扫描件",
       description: "图片只在浏览器本地整理，生成一张可导出的胶片索引图。",
-      progress: "0%",
     },
     dragging: {
       title: "释放以装入扫描件",
       description: "检片轨道已就绪，支持 JPG、PNG 与 WebP。",
-      progress: "0%",
     },
     reading: {
-      title: "正在读取 4 / 6 张",
-      description: "扫描门只演示界面反馈，不会触发真实导入或画布重绘。",
-      progress: "67%",
-    },
-    idle: {
-      title: "等待导入扫描件",
-      description: "检片台进入静止状态，仅保留低频片基反光。",
-      progress: "0%",
+      title: "正在读取扫描件",
+      description: "正在本地解码图片并准备胶片索引预览。",
     },
   };
 
-  function setDemoScene(scene) {
-    if (!filmDemoStage || !demoScenes[scene]) return;
-    const next = demoScenes[scene];
-    filmDemoStage.dataset.demoState = scene;
-    filmDemoStage.style.setProperty("--demo-progress", next.progress);
-    filmDemoTitle.textContent = next.title;
-    filmDemoDescription.textContent = next.description;
-    filmDemoControls.querySelectorAll("[data-demo-action]").forEach((button) => {
-      if (button.dataset.demoAction === "motion") return;
-      const active = button.dataset.demoAction === scene;
-      button.setAttribute("aria-pressed", String(active));
-    });
+  function setFilmStageState(nextState) {
+    const next = filmStageStates[nextState];
+    if (!filmStage || !next) return;
+    filmStage.dataset.filmState = nextState;
+    filmTitle.textContent = next.title;
+    filmDescription.textContent = next.description;
   }
 
-  function replayDemoIntro() {
-    if (!filmDemoStage) return;
-    setDemoScene("intro");
-    const animated = [filmDemoStage, ...filmDemoStage.querySelectorAll("*")];
-    animated.forEach((element) => {
-      element.style.animation = "none";
-    });
-    void filmDemoStage.offsetWidth;
-    animated.forEach((element) => {
-      element.style.removeProperty("animation");
-    });
-  }
-
-  if (uiMode === "film-demo" && filmDemoControls) {
-    setDemoScene("intro");
-    filmDemoControls.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-demo-action]");
-      if (!button) return;
-      const action = button.dataset.demoAction;
-      if (action === "motion") {
-        document.body.classList.toggle("demo-reduced-motion");
-        button.setAttribute("aria-pressed", String(document.body.classList.contains("demo-reduced-motion")));
-        return;
-      }
-      if (action === "intro") {
-        replayDemoIntro();
-        return;
-      }
-      setDemoScene(action);
-    });
+  function hasFileDrag(event) {
+    return Array.from(event.dataTransfer?.types || []).includes("Files");
   }
 
   // ---- 文件导入事件绑定 ----
@@ -253,21 +203,36 @@
     fileInput.value = "";
   });
 
-  ["dragenter", "dragover"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      dropZone.classList.add("is-dragging");
-    });
+  let fileDragDepth = 0;
+
+  dropZone.addEventListener("dragenter", (event) => {
+    event.preventDefault();
+    if (!hasFileDrag(event)) return;
+    fileDragDepth += 1;
+    dropZone.classList.add("is-dragging");
+    if (!state.items.length) setFilmStageState("dragging");
   });
 
-  ["dragleave", "drop"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      dropZone.classList.remove("is-dragging");
-    });
+  dropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (!hasFileDrag(event)) return;
+    dropZone.classList.add("is-dragging");
+    if (!state.items.length) setFilmStageState("dragging");
+  });
+
+  dropZone.addEventListener("dragleave", (event) => {
+    event.preventDefault();
+    if (!hasFileDrag(event)) return;
+    fileDragDepth = Math.max(0, fileDragDepth - 1);
+    if (fileDragDepth) return;
+    dropZone.classList.remove("is-dragging");
+    if (!state.items.length) setFilmStageState("intro");
   });
 
   dropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    fileDragDepth = 0;
+    dropZone.classList.remove("is-dragging");
     const files = Array.from(event.dataTransfer.files || []);
     loadFiles(files);
   });
@@ -276,6 +241,12 @@
   ["dragover", "drop"].forEach((eventName) => {
     document.addEventListener(eventName, (event) => {
       event.preventDefault();
+      if (eventName !== "drop") return;
+      fileDragDepth = 0;
+      dropZone.classList.remove("is-dragging");
+      if (!state.items.length && !previewWrap.classList.contains("is-loading")) {
+        setFilmStageState("intro");
+      }
     });
   });
 
@@ -1715,6 +1686,7 @@
     emptyState.classList.remove("is-hidden");
     previewWrap.classList.remove("is-loading");
     previewWrap.classList.add("is-empty");
+    setFilmStageState("intro");
     statusTitle.textContent = "等待导入扫描件";
     imageCounter.textContent = "0 张";
     exportButton.disabled = true;
@@ -2026,10 +1998,14 @@
   }
 
   async function loadFiles(files, insertBeforeId = null) {
-    if (!files.length) return;
+    if (!files.length) {
+      if (!state.items.length) setFilmStageState("intro");
+      return;
+    }
     const imageFiles = files.filter((file) => /^image\/(jpeg|png|webp)$/.test(file.type));
     const skipped = files.length - imageFiles.length;
     if (!imageFiles.length) {
+      if (!state.items.length) setFilmStageState("intro");
       if (skipped) {
         showNotice(`跳过了 ${skipped} 个不支持的文件（仅支持 JPG / PNG / WebP）`);
       }
@@ -2038,6 +2014,7 @@
 
     statusTitle.textContent = "正在读取扫描件...";
     previewWrap.classList.add("is-loading");
+    if (!state.items.length) setFilmStageState("reading");
     exportButton.disabled = true;
 
     const loaded = await Promise.allSettled(imageFiles.map(readImageFile));
