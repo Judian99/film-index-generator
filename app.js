@@ -170,6 +170,42 @@
     { id: "cinestill-800t", name: "CineStill 800T", edgeText: "CINESTILL 800T", process: "ECN-2", sprocketsIn120: true },
     { id: "cinestill-50d", name: "CineStill 50D", edgeText: "CINESTILL 50D", process: "ECN-2", sprocketsIn120: true },
     { id: "cinestill-400d", name: "CineStill 400D", edgeText: "CINESTILL 400D", process: "ECN-2", sprocketsIn120: true },
+    { id: "cinestill-bwxx", name: "CineStill bwXX", edgeText: "CINESTILL bwXX", process: "BW", sprocketsIn120: true },
+
+    // Kodak Vision3 电影胶片
+    { id: "kodak-vision3-500t-5219", name: "Kodak Vision3 500T (5219)", edgeText: "KODAK VISION3 500T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-500t-7219", name: "Kodak Vision3 500T (7219)", edgeText: "KODAK VISION3 500T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-250d-5207", name: "Kodak Vision3 250D (5207)", edgeText: "KODAK VISION3 250D", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-250d-7207", name: "Kodak Vision3 250D (7207)", edgeText: "KODAK VISION3 250D", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-200t-5213", name: "Kodak Vision3 200T (5213)", edgeText: "KODAK VISION3 200T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-200t-7213", name: "Kodak Vision3 200T (7213)", edgeText: "KODAK VISION3 200T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-160-7211", name: "Kodak Vision3 160 (7211)", edgeText: "KODAK VISION3 160", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-50d-5203", name: "Kodak Vision3 50D (5203)", edgeText: "KODAK VISION3 50D", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision3-50d-7203", name: "Kodak Vision3 50D (7203)", edgeText: "KODAK VISION3 50D", process: "ECN-2", sprocketsIn120: true },
+
+    // Kodak Vision2 电影胶片
+    { id: "kodak-vision2-500t-5218", name: "Kodak Vision2 500T (5218)", edgeText: "KODAK VISION2 500T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision2-500t-7218", name: "Kodak Vision2 500T (7218)", edgeText: "KODAK VISION2 500T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision2-250d-5205", name: "Kodak Vision2 250D (5205)", edgeText: "KODAK VISION2 250D", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-vision2-100t-7212", name: "Kodak Vision2 100T (7212)", edgeText: "KODAK VISION2 100T", process: "ECN-2", sprocketsIn120: true },
+
+    // Kodak 其他电影胶片
+    { id: "kodak-5247-250t", name: "Kodak 5247 250T", edgeText: "KODAK 5247 250T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-5287-200t", name: "Kodak 5287 200T", edgeText: "KODAK 5287 200T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-5293-500t", name: "Kodak 5293 500T", edgeText: "KODAK 5293 500T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-exr-500t-5279", name: "Kodak EXR 500T (5279)", edgeText: "KODAK EXR 500T", process: "ECN-2", sprocketsIn120: true },
+    { id: "kodak-exr-500t-7279", name: "Kodak EXR 500T (7279)", edgeText: "KODAK EXR 500T", process: "ECN-2", sprocketsIn120: true },
+
+    // Fujifilm 电影胶片
+    { id: "fujifilm-eterna-500t", name: "Fujifilm Eterna 500T", edgeText: "FUJI ETERNA 500T", process: "ECN-2", sprocketsIn120: true },
+    { id: "fujifilm-eterna-250t", name: "Fujifilm Eterna 250T", edgeText: "FUJI ETERNA 250T", process: "ECN-2", sprocketsIn120: true },
+    { id: "fujifilm-reala-500d", name: "Fujifilm Reala 500D", edgeText: "FUJI REALA 500D", process: "ECN-2", sprocketsIn120: true },
+    { id: "fujifilm-f-64d", name: "Fujifilm F-64D", edgeText: "FUJI F-64D", process: "ECN-2", sprocketsIn120: true },
+
+    // 其他电影胶片品牌
+    { id: "ortwo-un54", name: "Orwo UN54 (NP20)", edgeText: "ORWO UN54", process: "BW", sprocketsIn120: true },
+    { id: "ortwo-n74-plus", name: "Orwo N74 Plus", edgeText: "ORWO N74 PLUS", process: "BW", sprocketsIn120: true },
+    { id: "silberra-p-an100-t", name: "Silberra P-A100-T", edgeText: "SILBERRA P-A100-T", process: "BW", sprocketsIn120: true },
 
     // Foma 黑白胶片
     { id: "fomapan-100", name: "Fomapan 100", edgeText: "FOMAPAN 100", process: "BW" },
@@ -204,6 +240,7 @@
     fontSize120: 0.74, // 120 字号 / 边字带高度
     textOffsetY: 0.38, // 边字中线到胶片外缘的距离 / 边字带高度（真实底片边字几乎贴着片边）
     textSprocketGap: 0.022, // 齿孔带向边字方向收紧的距离 / frameW（越大边字与齿孔离得越近）
+    textSprocketGap120: 0.015, // 120 齿孔带向边字方向收紧的距离 / 画幅高
     band120: 0.044, // 120 边字带高度 / 画幅高
     gap120: 0.085, // 120 帧间隙 / 画幅高
   };
@@ -985,9 +1022,11 @@
       // 四种 120 画幅共享同一物理片宽
       sprocketH = showSprocketHoles ? Math.round(slotH * 0.09) : 0;
       textH = showEdgeText.checked ? Math.round(slotH * TUNE.band120) : 0;
-      textSprocketShift = 0;
+      // 齿孔带向外缘方向收紧，让齿孔更贴近边字（仅两者都显示时生效）
+      textSprocketShift =
+        sprocketH && textH ? Math.min(Math.round(slotH * TUNE.textSprocketGap120), textH) : 0;
       // 关掉边字后窄黑留边（物理 rebate）仍占位
-      bandH = Math.max(sprocketH + textH, Math.round(slotH * 0.02));
+      bandH = Math.max(sprocketH + textH - textSprocketShift, Math.round(slotH * 0.02));
       stripPadX = Math.round(slotH * 0.05);
       // 齿孔节距按 135 物理孔距 4.75mm 对 56mm 画幅高换算（仅 ECN-2 电影卷可见）
       sprocketPitch = slotH * (4.75 / 56);
@@ -2514,9 +2553,13 @@
       { key: "holeH", label: "齿孔高度 (×齿孔带)", min: 0.3, max: 1, step: 0.02 },
       { key: "holeW", label: "齿孔宽度 (×frameW)", min: 0.02, max: 0.1, step: 0.002 },
       { key: "textH", label: "边字带高度 (×frameW)", min: 0.03, max: 0.16, step: 0.002 },
+      { key: "band120", label: "120边字带高度 (×画幅高)", min: 0.02, max: 0.1, step: 0.002 },
+      { key: "gap120", label: "120帧间隙 (×画幅高)", min: 0.03, max: 0.15, step: 0.002 },
       { key: "fontSize", label: "字号 (×边字带)", min: 0.4, max: 1.2, step: 0.02 },
+      { key: "fontSize120", label: "120字号 (×边字带)", min: 0.4, max: 1.2, step: 0.02 },
       { key: "textOffsetY", label: "边字到片边距离 (×边字带)", min: 0.2, max: 0.8, step: 0.02 },
       { key: "textSprocketGap", label: "齿孔向边字收紧 (×frameW)", min: 0, max: 0.05, step: 0.002 },
+      { key: "textSprocketGap120", label: "120齿孔向边字收紧 (×画幅高)", min: 0, max: 0.05, step: 0.002 },
     ];
     const defaults = { ...TUNE };
 
