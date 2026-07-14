@@ -214,6 +214,7 @@
 
     // 乐凯
     { id: "lucky-c200", name: "Lucky C200 乐凯彩色负片", edgeText: "LUCKY C200", process: "C-41" },
+    { id: "lucky-c400", name: "Lucky C400 乐凯彩色负片", edgeText: "LUCKY C400", process: "C-41" },
     { id: "lucky-shd-100", name: "Lucky SHD 100 乐凯黑白", edgeText: "LUCKY SHD 100", process: "BW" },
 
     // Lomography
