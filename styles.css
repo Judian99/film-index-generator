@@ -599,6 +599,10 @@ select {
   accent-color: var(--accent);
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .field {
   display: grid;
   gap: 7px;

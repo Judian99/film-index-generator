@@ -71,6 +71,15 @@
           </label>
           <small id="sprocketsHint" class="field-hint" hidden></small>
           <label class="checkbox-row">
+            <input id="imageInSprockets" type="checkbox" />
+            <span>成像覆盖齿孔区</span>
+          </label>
+          <label class="checkbox-row">
+            <input id="imageInEdgeText" type="checkbox" />
+            <span>成像覆盖边字区</span>
+          </label>
+          <small id="imageCoverageHint" class="field-hint" hidden></small>
+          <label class="checkbox-row">
             <input id="showLeader" type="checkbox" checked />
             <span>模拟片头片尾</span>
           </label>
@@ -145,8 +154,11 @@
               <option value="66">6×6 方画幅 1:1</option>
               <option value="645">6×4.5 中画幅（竖幅）</option>
               <option value="67">6×7 中画幅</option>
-              <option value="69">6×9 中画幅</option>
-              <option value="xpan">XPan 宽幅 65:24</option>
+              <option value="69">6×9 中画幅 84×56</option>
+              <option value="xpan">XPan 135 宽幅 65×24</option>
+              <option value="135-69">135 宽幅 84×24（6×9 相机）</option>
+              <option value="612">6×12 宽幅中画幅</option>
+              <option value="617">6×17 宽幅中画幅</option>
             </select>
           </label>
           <div class="field" id="halfFrameModeField" hidden>
@@ -176,8 +188,9 @@
             <small id="columnsHint" class="field-hint" hidden></small>
           </label>
           <label class="field">
-            <span>单张宽度</span>
+            <span>尺寸基准</span>
             <input id="frameWidth" type="number" min="180" max="1200" step="20" value="420" />
+            <small class="field-hint">135 以标准 36mm 画幅为基准，宽幅长边按物理比例增长</small>
           </label>
           <label class="field">
             <span>输出质量</span>
@@ -327,6 +340,7 @@
           </div>
         </div>
         <div class="crop-footer">
+          <button type="button" class="text-button" id="cropRestoreOriginal">恢复原图</button>
           <button type="button" class="text-button" id="cropReset">重置</button>
           <button type="button" class="text-button" id="cropCancel">取消</button>
           <button type="button" class="primary-button" id="cropApply">应用裁切</button>
