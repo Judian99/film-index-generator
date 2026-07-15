@@ -1,0 +1,20 @@
+{
+  "name": "film-index-baidu-pan",
+  "version": "1.0.0",
+  "description": "Cloudflare Workers API proxy for Baidu Pan integration",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
+  "keywords": [
+    "cloudflare-workers",
+    "baidu-pan",
+    "oauth"
+  ],
+  "license": "MIT"
+}

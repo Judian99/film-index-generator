@@ -2786,6 +2786,322 @@
   setupStockPanel();
   setupTunePanel();
 
+  // ---- 百度网盘集成 ----
+  const API_BASE = (typeof BAIDU_PAN_API !== 'undefined')
+    ? BAIDU_PAN_API
+    : 'https://film-index-baidu-pan.workers.dev';
+
+  const BaiduPanIntegration = {
+    isLoggedIn: false,
+    currentPath: '/',
+    selectedFiles: new Set(),
+    browserModal: null,
+
+    /** 检查登录状态 */
+    async checkAuthStatus() {
+      try {
+        const res = await fetch(`${API_BASE}/status`, {
+          credentials: 'include'
+        });
+        const data = await res.json();
+        this.isLoggedIn = data.logged_in;
+        return data;
+      } catch (e) {
+        this.isLoggedIn = false;
+        return { logged_in: false, error: e.message };
+      }
+    },
+
+    /** 发起登录 */
+    login() {
+      window.location.href = `${API_BASE}/auth`;
+    },
+
+    /** 登出 */
+    async logout() {
+      try {
+        await fetch(`${API_BASE}/logout`, {
+          credentials: 'include'
+        });
+        this.isLoggedIn = false;
+      } catch (e) {
+        console.error('Logout error:', e);
+      }
+    },
+
+    /** 获取文件列表 */
+    async listFiles(path = '/', page = 1, num = 100) {
+      const res = await fetch(
+        `${API_BASE}/files?path=${encodeURIComponent(path)}&page=${page}&num=${num}`,
+        { credentials: 'include' }
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to list files');
+      }
+      return res.json();
+    },
+
+    /** 下载文件 */
+    async downloadFile(fsId) {
+      const res = await fetch(
+        `${API_BASE}/download?fs_id=${fsId}`,
+        { credentials: 'include' }
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to download file');
+      }
+      return res.blob();
+    },
+
+    /** 打开文件浏览器弹窗 */
+    async openBrowser() {
+      if (!this.isLoggedIn) {
+        const ok = confirm('需要登录百度网盘账号才能导入照片。\n点击确定前往百度授权页面。');
+        if (ok) this.login();
+        return;
+      }
+
+      this.currentPath = '/';
+      this.selectedFiles = new Set();
+      this.showBrowserModal();
+      await this.loadDirectory('/');
+    },
+
+    /** 显示文件浏览器弹窗 */
+    showBrowserModal() {
+      if (!this.browserModal) {
+        this.createBrowserModal();
+      }
+      this.browserModal.hidden = false;
+    },
+
+    /** 创建文件浏览器弹窗 DOM */
+    createBrowserModal() {
+      const modal = document.createElement('div');
+      modal.className = 'baidu-pan-modal';
+      modal.hidden = true;
+      modal.innerHTML = `
+        <div class="baidu-pan-backdrop"></div>
+        <div class="baidu-pan-container">
+          <div class="baidu-pan-header">
+            <h3>从百度网盘导入</h3>
+            <div class="baidu-pan-header-actions">
+              <button type="button" class="text-button baidu-pan-refresh" title="刷新">↻</button>
+              <button type="button" class="baidu-pan-close" aria-label="关闭">×</button>
+            </div>
+          </div>
+          <div class="baidu-pan-path" id="baiduPanPath">/</div>
+          <div class="baidu-pan-body">
+            <div class="baidu-pan-loading">加载中...</div>
+            <div class="baidu-pan-empty" hidden>此目录为空</div>
+            <div class="baidu-pan-error" hidden></div>
+            <div class="baidu-pan-grid" id="baiduPanGrid"></div>
+          </div>
+          <div class="baidu-pan-footer">
+            <span class="baidu-pan-selected">已选择 0 张照片</span>
+            <div class="baidu-pan-footer-actions">
+              <button type="button" class="text-button" id="baiduPanCancel">取消</button>
+              <button type="button" class="primary-button" id="baiduPanImport" disabled>导入选中照片</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // 事件绑定
+      modal.querySelector('.baidu-pan-close').addEventListener('click', () => {
+        this.closeBrowser();
+      });
+      modal.querySelector('#baiduPanCancel').addEventListener('click', () => {
+        this.closeBrowser();
+      });
+      modal.querySelector('.baidu-pan-refresh').addEventListener('click', () => {
+        this.loadDirectory(this.currentPath);
+      });
+      modal.querySelector('#baiduPanImport').addEventListener('click', () => {
+        this.importSelected();
+      });
+
+      document.body.appendChild(modal);
+      this.browserModal = modal;
+
+      // 点击背景关闭
+      modal.querySelector('.baidu-pan-backdrop').addEventListener('click', () => {
+        this.closeBrowser();
+      });
+    },
+
+    /** 加载目录 */
+    async loadDirectory(path) {
+      const grid = this.browserModal.querySelector('#baiduPanGrid');
+      const loading = this.browserModal.querySelector('.baidu-pan-loading');
+      const empty = this.browserModal.querySelector('.baidu-pan-empty');
+      const error = this.browserModal.querySelector('.baidu-pan-error');
+      const pathEl = this.browserModal.querySelector('#baiduPanPath');
+
+      grid.innerHTML = '';
+      loading.hidden = false;
+      empty.hidden = true;
+      error.hidden = true;
+
+      this.currentPath = path;
+      pathEl.textContent = path;
+
+      try {
+        const data = await this.listFiles(path);
+        loading.hidden = true;
+
+        if (!data.files || data.files.length === 0) {
+          empty.hidden = false;
+          return;
+        }
+
+        // 先显示文件夹，再显示图片
+        const dirs = data.files.filter(f => f.is_dir);
+        const images = data.files.filter(f => !f.is_dir && f.is_image);
+
+        dirs.forEach(dir => {
+          const item = this.createGridItem(dir, true);
+          grid.appendChild(item);
+        });
+        images.forEach(img => {
+          const item = this.createGridItem(img, false);
+          grid.appendChild(item);
+        });
+
+      } catch (e) {
+        loading.hidden = true;
+        error.hidden = false;
+        error.textContent = `加载失败: ${e.message}`;
+      }
+    },
+
+    /** 创建网格项 */
+    createGridItem(file, isDir) {
+      const item = document.createElement('div');
+      item.className = 'baidu-pan-item';
+      if (isDir) {
+        item.classList.add('baidu-pan-dir');
+      }
+
+      const icon = document.createElement('div');
+      icon.className = 'baidu-pan-item-icon';
+      icon.textContent = isDir ? '📁' : '🖼';
+
+      const name = document.createElement('div');
+      name.className = 'baidu-pan-item-name';
+      name.textContent = file.filename;
+
+      item.appendChild(icon);
+      item.appendChild(name);
+
+      if (isDir) {
+        // 双击进入文件夹
+        item.addEventListener('dblclick', () => {
+          this.loadDirectory(file.path);
+        });
+        // 单次点击也进入文件夹
+        item.addEventListener('click', () => {
+          this.loadDirectory(file.path);
+        });
+      } else {
+        // 选择图片
+        const fsId = String(file.fs_id);
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (this.selectedFiles.has(fsId)) {
+            this.selectedFiles.delete(fsId);
+            item.classList.remove('selected');
+          } else {
+            this.selectedFiles.add(fsId);
+            item.classList.add('selected');
+          }
+          this.updateSelectedCount();
+        });
+      }
+
+      return item;
+    },
+
+    /** 更新已选数量 */
+    updateSelectedCount() {
+      const count = this.selectedFiles.size;
+      const el = this.browserModal.querySelector('.baidu-pan-selected');
+      const importBtn = this.browserModal.querySelector('#baiduPanImport');
+      el.textContent = `已选择 ${count} 张照片`;
+      importBtn.disabled = count === 0;
+    },
+
+    /** 关闭弹窗 */
+    closeBrowser() {
+      if (this.browserModal) {
+        this.browserModal.hidden = true;
+      }
+      this.selectedFiles = new Set();
+    },
+
+    /** 导入选中照片 */
+    async importSelected() {
+      const fsIds = Array.from(this.selectedFiles);
+      if (fsIds.length === 0) return;
+
+      const importBtn = this.browserModal.querySelector('#baiduPanImport');
+      const originalText = importBtn.textContent;
+      importBtn.disabled = true;
+      importBtn.textContent = `正在下载 ${fsIds.length} 张照片...`;
+
+      try {
+        // 显示通知
+        showNotice(`正在从百度网盘下载 ${fsIds.length} 张照片...`);
+
+        // 下载所有选中文件
+        const blobs = await Promise.all(
+          fsIds.map(fsId => this.downloadFile(fsId))
+        );
+
+        // 转换为 File 对象
+        const files = blobs.map((blob, i) => {
+          const ext = blob.type === 'image/png' ? '.png' : '.jpg';
+          return new File([blob], `baidu_pan_${i + 1}${ext}`, { type: blob.type });
+        });
+
+        // 使用现有的加载函数
+        this.closeBrowser();
+        await loadFiles(files);
+
+      } catch (e) {
+        showNotice(`导入失败: ${e.message}`);
+        console.error('Import error:', e);
+      } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = originalText;
+      }
+    }
+  };
+
+  // 添加"从百度网盘导入"按钮
+  const baiduPanButton = document.createElement('button');
+  baiduPanButton.type = 'button';
+  baiduPanButton.className = 'baidu-pan-button';
+  baiduPanButton.textContent = '从百度网盘导入';
+  dropZone.parentNode.insertBefore(baiduPanButton, dropZone.nextSibling);
+
+  baiduPanButton.addEventListener('click', async () => {
+    baiduPanButton.disabled = true;
+    baiduPanButton.textContent = '检查登录状态...';
+    try {
+      await BaiduPanIntegration.checkAuthStatus();
+      await BaiduPanIntegration.openBrowser();
+    } catch (e) {
+      console.error('Baidu Pan error:', e);
+      showNotice('百度网盘连接失败，请稍后重试');
+    } finally {
+      baiduPanButton.disabled = false;
+      baiduPanButton.textContent = '从百度网盘导入';
+    }
+  });
+
   // 确保裁切模态框和菜单初始状态为隐藏
   cropModal.hidden = true;
   frameMenu.hidden = true;

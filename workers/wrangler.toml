@@ -1,0 +1,13 @@
+name = "film-index-baidu-pan"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# 非敏感配置（公开信息）
+[vars]
+FRONTEND_URL = "https://judian99.github.io"
+
+# 敏感信息通过 Secrets 设置（不在此文件中）
+# 使用命令: wrangler secret put <NAME>
+# - BAIDU_CLIENT_ID
+# - BAIDU_CLIENT_SECRET
+# - TOKEN_ENCRYPTION_KEY

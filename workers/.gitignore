@@ -1,0 +1,12 @@
+# Workers node_modules
+workers/node_modules/
+
+# Environment files
+.env
+.dev.vars
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
