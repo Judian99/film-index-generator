@@ -2814,7 +2814,7 @@
 
     /** 发起登录 */
     login() {
-      window.location.href = `${API_BASE}/auth`;
+      window.location.href = `${API_BASE}/auth?t=${Date.now()}`;
     },
 
     /** 登出 */
