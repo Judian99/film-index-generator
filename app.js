@@ -3084,12 +3084,19 @@
   const baiduPanButton = document.createElement('button');
   baiduPanButton.type = 'button';
   baiduPanButton.className = 'baidu-pan-button';
-  baiduPanButton.textContent = '从百度网盘导入';
+  baiduPanButton.innerHTML = `
+    <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg></span>
+    从百度网盘导入
+  `;
   dropZone.parentNode.insertBefore(baiduPanButton, dropZone.nextSibling);
 
   baiduPanButton.addEventListener('click', async () => {
     baiduPanButton.disabled = true;
-    baiduPanButton.textContent = '检查登录状态...';
+    baiduPanButton.innerHTML = '<span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>检查登录状态...';
     try {
       await BaiduPanIntegration.checkAuthStatus();
       await BaiduPanIntegration.openBrowser();
@@ -3098,7 +3105,14 @@
       showNotice('百度网盘连接失败，请稍后重试');
     } finally {
       baiduPanButton.disabled = false;
-      baiduPanButton.textContent = '从百度网盘导入';
+      baiduPanButton.innerHTML = `
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg></span>
+        从百度网盘导入
+      `;
     }
   });
 
