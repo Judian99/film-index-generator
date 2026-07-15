@@ -19,6 +19,12 @@
     <td align="center" width="33%"><img src="docs/images/66画幅索引.jpg" alt="6×6 底片索引图" width="100%"></td>
     <td align="center" width="33%"><img src="docs/images/69画幅索引.jpg" alt="6×9 底片索引图" width="100%"></td>
   </tr>
+  <tr>
+    <th align="center" colspan="3">XPan 135 宽幅（65×24mm）</th>
+  </tr>
+  <tr>
+    <td align="center" colspan="3"><img src="docs/images/xpan索引.jpg" alt="XPan 135 宽幅索引图" width="100%"></td>
+  </tr>
 </table>
 
 ---

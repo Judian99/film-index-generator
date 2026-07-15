@@ -1338,7 +1338,7 @@
       drawSprockets(x, bottomZoneY, stripW, options);
       if (rowInfo.leader) {
         const geo = leaderGeometry(x, y, stripH, options);
-        drawSprockets(x, topZoneY, stripW, options, geo.footX, null);
+        drawSprockets(x, topZoneY, stripW, options, geo.footX);
       } else {
         drawSprockets(x, topZoneY, stripW, options);
       }
@@ -1420,7 +1420,7 @@
     ctx.closePath();
   }
 
-  // 片头舌几何参数：轮廓与齿孔排布共用，保证孔永远不会压到舌部切口
+  // 片头舌几何参数：用于构造片舌轮廓，并过滤曲线边缘仅剩细碎露出的齿孔
   function leaderGeometry(x, y, stripH, options) {
     const r = Math.max(6, Math.round(options.frameW * 0.015));
     // 舌部切边：略过片宽中线（参考图约 0.48），切掉的上半部分高度即过渡弧高
@@ -1431,7 +1431,7 @@
       curveH,
       // 弧宽 ≈ 弧高，近似四分之一圆的平滑过渡
       curveW: curveH,
-      // 弧线与全高上缘的交点：舌区到此结束，其后恢复完整上排齿孔
+      // 弧线与全高上缘的交点：舌区到此结束
       footX: x + options.leaderW,
       tongueR: Math.min(r * 3, stripH * 0.12),
     };
@@ -1539,8 +1539,8 @@
   }
 
   // 齿孔节距与孔宽由 getRenderOptions 按画幅派生（135 按孔距 4.75mm≈画幅宽 1/8；120 仅 ECN-2 电影卷可见）
-  // minX/maxX：只画完整落在 [minX, maxX] 区间内的孔（片头行用来避开舌部切口弧线），不改变孔距相位
-  function drawSprockets(x, zoneY, stripW, options, minX = null, maxX = null) {
+  // 胶片条的外层 clip 负责轮廓裁切；片头可过滤在曲线边缘仅剩细碎露出的孔
+  function drawSprockets(x, zoneY, stripW, options, leaderFootX = null) {
     const pitch = options.sprocketPitch;
     const holeW = options.sprocketHoleW;
     const holeH = Math.round(options.sprocketH * TUNE.holeH);
@@ -1549,8 +1549,7 @@
     const margin = Math.round(options.frameW * 0.04);
 
     for (let hx = x + margin; hx + holeW < x + stripW - margin; hx += pitch) {
-      if (minX !== null && hx < minX) continue;
-      if (maxX !== null && hx + holeW > maxX) continue;
+      if (leaderFootX !== null && hx + holeW * 1.75 < leaderFootX) continue;
       // 孔内先铺一层深色内阴影再露出纸底，边缘更立体
       roundedRect(ctx, hx, holeY, holeW, holeH, holeR);
       ctx.fillStyle = "#f4eddf";
