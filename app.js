@@ -2795,6 +2795,7 @@
     isLoggedIn: false,
     currentPath: '/',
     selectedFiles: new Set(),
+    currentDirectoryFileIds: new Set(),
     browserModal: null,
 
     /** 检查登录状态 */
@@ -2892,7 +2893,13 @@
               <button type="button" class="baidu-pan-close" aria-label="关闭">×</button>
             </div>
           </div>
-          <div class="baidu-pan-path" id="baiduPanPath">/</div>
+          <div class="baidu-pan-toolbar">
+            <div class="baidu-pan-path" id="baiduPanPath">/</div>
+            <label class="baidu-pan-select-all">
+              <input type="checkbox" id="baiduPanSelectAll" disabled />
+              <span>全选</span>
+            </label>
+          </div>
           <div class="baidu-pan-body">
             <div class="baidu-pan-loading">加载中...</div>
             <div class="baidu-pan-empty" hidden>此目录为空</div>
@@ -2919,6 +2926,18 @@
       modal.querySelector('.baidu-pan-refresh').addEventListener('click', () => {
         this.loadDirectory(this.currentPath);
       });
+      modal.querySelector('#baiduPanSelectAll').addEventListener('change', (event) => {
+        const shouldSelect = event.currentTarget.checked;
+        this.currentDirectoryFileIds.forEach(fsId => {
+          if (shouldSelect) {
+            this.selectedFiles.add(fsId);
+          } else {
+            this.selectedFiles.delete(fsId);
+          }
+        });
+        this.syncRenderedSelection();
+        this.updateSelectedCount();
+      });
       modal.querySelector('#baiduPanImport').addEventListener('click', () => {
         this.importSelected();
       });
@@ -2943,7 +2962,10 @@
       grid.innerHTML = '';
       loading.hidden = false;
       empty.hidden = true;
+      empty.textContent = '此目录为空';
       error.hidden = true;
+      this.currentDirectoryFileIds = new Set();
+      this.updateSelectedCount();
 
       this.currentPath = path;
       pathEl.textContent = path;
@@ -2954,16 +2976,19 @@
 
         if (!data.files || data.files.length === 0) {
           empty.hidden = false;
+          this.updateSelectedCount();
           return;
         }
 
         // 先显示文件夹，再显示图片
         const dirs = data.files.filter(f => f.is_dir);
         const images = data.files.filter(f => !f.is_dir && f.is_image);
+        this.currentDirectoryFileIds = new Set(images.map(file => String(file.fs_id)));
 
         if (dirs.length === 0 && images.length === 0) {
           empty.textContent = '此目录没有可导入的图片';
           empty.hidden = false;
+          this.updateSelectedCount();
           return;
         }
 
@@ -2975,11 +3000,14 @@
           const item = this.createGridItem(img, false);
           grid.appendChild(item);
         });
+        this.updateSelectedCount();
 
       } catch (e) {
         loading.hidden = true;
         error.hidden = false;
         error.textContent = `加载失败: ${e.message}`;
+        this.currentDirectoryFileIds = new Set();
+        this.updateSelectedCount();
       }
     },
 
@@ -2987,47 +3015,91 @@
     createGridItem(file, isDir) {
       const item = document.createElement('div');
       item.className = 'baidu-pan-item';
-      if (isDir) {
-        item.classList.add('baidu-pan-dir');
-      }
 
-      const icon = document.createElement('div');
-      icon.className = 'baidu-pan-item-icon';
-      icon.textContent = isDir ? '📁' : '🖼';
+      const preview = document.createElement('div');
+      preview.className = 'baidu-pan-item-preview';
+
+      const fallback = document.createElement('div');
+      fallback.className = 'baidu-pan-item-icon';
+      fallback.textContent = isDir ? '📁' : '🖼';
+      preview.appendChild(fallback);
 
       const name = document.createElement('div');
       name.className = 'baidu-pan-item-name';
       name.textContent = file.filename;
-
-      item.appendChild(icon);
-      item.appendChild(name);
+      name.title = file.filename;
 
       if (isDir) {
-        // 双击进入文件夹
-        item.addEventListener('dblclick', () => {
-          this.loadDirectory(file.path);
-        });
-        // 单次点击也进入文件夹
+        item.classList.add('baidu-pan-dir');
+        item.appendChild(preview);
+        item.appendChild(name);
         item.addEventListener('click', () => {
           this.loadDirectory(file.path);
         });
-      } else {
-        // 选择图片
-        const fsId = String(file.fs_id);
-        item.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (this.selectedFiles.has(fsId)) {
-            this.selectedFiles.delete(fsId);
-            item.classList.remove('selected');
-          } else {
-            this.selectedFiles.add(fsId);
-            item.classList.add('selected');
-          }
-          this.updateSelectedCount();
-        });
+        return item;
       }
 
+      const fsId = String(file.fs_id);
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'baidu-pan-item-checkbox';
+      checkbox.setAttribute('aria-label', `选择 ${file.filename}`);
+
+      if (file.thumbnail_url) {
+        const thumbnail = document.createElement('img');
+        thumbnail.className = 'baidu-pan-item-thumbnail';
+        thumbnail.src = file.thumbnail_url;
+        thumbnail.alt = '';
+        thumbnail.loading = 'lazy';
+        thumbnail.addEventListener('error', () => {
+          thumbnail.remove();
+        }, { once: true });
+        preview.appendChild(thumbnail);
+      }
+
+      item.dataset.fsId = fsId;
+      item.setAttribute('aria-selected', 'false');
+      item.appendChild(checkbox);
+      item.appendChild(preview);
+      item.appendChild(name);
+
+      checkbox.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+      checkbox.addEventListener('change', () => {
+        this.setFileSelection(fsId, checkbox.checked, item, checkbox);
+      });
+      item.addEventListener('click', () => {
+        this.setFileSelection(fsId, !this.selectedFiles.has(fsId), item, checkbox);
+      });
+
+      this.setFileSelection(fsId, this.selectedFiles.has(fsId), item, checkbox, false);
       return item;
+    },
+
+    /** 设置单个文件的选择状态 */
+    setFileSelection(fsId, selected, item, checkbox, updateCount = true) {
+      if (selected) {
+        this.selectedFiles.add(fsId);
+      } else {
+        this.selectedFiles.delete(fsId);
+      }
+      item.classList.toggle('selected', selected);
+      item.setAttribute('aria-selected', String(selected));
+      checkbox.checked = selected;
+      if (updateCount) this.updateSelectedCount();
+    },
+
+    /** 同步当前目录的选择显示 */
+    syncRenderedSelection() {
+      this.browserModal.querySelectorAll('.baidu-pan-item[data-fs-id]').forEach(item => {
+        const fsId = item.dataset.fsId;
+        const checkbox = item.querySelector('.baidu-pan-item-checkbox');
+        const selected = this.selectedFiles.has(fsId);
+        item.classList.toggle('selected', selected);
+        item.setAttribute('aria-selected', String(selected));
+        checkbox.checked = selected;
+      });
     },
 
     /** 更新已选数量 */
@@ -3035,8 +3107,19 @@
       const count = this.selectedFiles.size;
       const el = this.browserModal.querySelector('.baidu-pan-selected');
       const importBtn = this.browserModal.querySelector('#baiduPanImport');
+      const selectAll = this.browserModal.querySelector('#baiduPanSelectAll');
+      let selectedInDirectory = 0;
+
+      this.currentDirectoryFileIds.forEach(fsId => {
+        if (this.selectedFiles.has(fsId)) selectedInDirectory += 1;
+      });
+
+      const directoryCount = this.currentDirectoryFileIds.size;
       el.textContent = `已选择 ${count} 张照片`;
       importBtn.disabled = count === 0;
+      selectAll.disabled = directoryCount === 0;
+      selectAll.checked = directoryCount > 0 && selectedInDirectory === directoryCount;
+      selectAll.indeterminate = selectedInDirectory > 0 && selectedInDirectory < directoryCount;
     },
 
     /** 关闭弹窗 */

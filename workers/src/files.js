@@ -79,7 +79,10 @@ export async function handleFiles(request, env, ctx) {
         is_dir: isDir,
         size: file.size,
         server_mtime: file.server_mtime,
-        is_image: isImage
+        is_image: isImage,
+        thumbnail_url: isImage
+          ? file.thumbs?.url2 || file.thumbs?.url1 || file.thumbs?.url3 || null
+          : null
       };
     });
 

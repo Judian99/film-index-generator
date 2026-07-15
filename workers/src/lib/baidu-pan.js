@@ -83,7 +83,8 @@ export async function listFiles(accessToken, path = '/', page = 1, num = 100, or
     page: page,
     num: num,
     order: order,
-    desc: desc
+    desc: desc,
+    web: 1
   });
 
   const url = `${BAIDU_API.FILE_LIST}?${params.toString()}`;
