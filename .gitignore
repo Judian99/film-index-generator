@@ -1,4 +1,8 @@
 .claude/
+/CLAUDE.md
 参考图/
 .verification/
 /.verify-film.js
+/test-results/
+/测试说明.md
+/*-local-command-caveat*.txt
