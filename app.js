@@ -44,6 +44,8 @@
   const stockImportButton = document.getElementById("stockImportButton");
   const stockImportInput = document.getElementById("stockImportInput");
   const frameAspect = document.getElementById("frameAspect");
+  const wideSpecField = document.getElementById("wideSpecField");
+  const wideSpecSelect = document.getElementById("wideSpecSelect");
   const halfFrameModeField = document.getElementById("halfFrameModeField");
   const halfFrameModeInputs = document.querySelectorAll("input[name='halfFrameMode']");
   const columnsSelect = document.getElementById("columnsSelect");
@@ -384,6 +386,7 @@
   });
 
   frameAspect.addEventListener("change", handleFrameModeChange);
+  wideSpecSelect.addEventListener("change", handleFrameModeChange);
   halfFrameModeInputs.forEach((control) => {
     control.addEventListener("change", handleFrameModeChange);
   });
@@ -563,7 +566,8 @@
       layout.rows.length - 1,
     );
     const rowInfo = layout.rows[row];
-    const frameStartX = options.sheetPad + options.stripPadX;
+    const rowX = getRowX(layout, row, options);
+    const frameStartX = rowX + options.stripPadX;
     const contentStartX = getRowContentStartX(frameStartX, rowInfo, options);
     const slot = clamp(
       Math.round((point.x - contentStartX) / (options.slotW + options.slotGap)),
@@ -623,11 +627,15 @@
     sprocketHoleWidthMm: 2.8,
   };
 
+  const WIDE_135_SPECS = {
+    xpan: { ratio: 65 / 24, imageWidthMm: 65, imageHeightMm: 24 },
+    "135-69": { ratio: 84 / 24, imageWidthMm: 84, imageHeightMm: 24 },
+  };
+
   const FORMATS = {
     "135": { family: "135", ratio: 36 / 24, imageWidthMm: 36, imageHeightMm: 24 },
     half: { family: "135", ratio: 18 / 24, imageWidthMm: 18, imageHeightMm: 24, half: true },
-    xpan: { family: "135", ratio: 65 / 24, imageWidthMm: 65, imageHeightMm: 24, wide: true },
-    "135-69": { family: "135", ratio: 84 / 24, imageWidthMm: 84, imageHeightMm: 24, wide: true },
+    wide: { family: "135", wide: true },
     "645": { family: "120", ratio: 41.5 / 56, columns: 4, portrait: true },
     "66": { family: "120", ratio: 1, columns: 3 },
     "67": { family: "120", ratio: 69.5 / 56, columns: 2 },
@@ -636,8 +644,17 @@
     "617": { family: "120", ratio: 168 / 56, columns: 2 },
   };
 
+  function getWide135SpecId() {
+    if (WIDE_135_SPECS[frameAspect.value]) return frameAspect.value;
+    return WIDE_135_SPECS[wideSpecSelect.value] ? wideSpecSelect.value : "xpan";
+  }
+
   function getFormat() {
-    return FORMATS[frameAspect.value] || FORMATS["135"];
+    const format = FORMATS[frameAspect.value];
+    if (format?.wide || WIDE_135_SPECS[frameAspect.value]) {
+      return { ...FORMATS.wide, ...WIDE_135_SPECS[getWide135SpecId()] };
+    }
+    return format || FORMATS["135"];
   }
 
   function get135WideCapacity(format) {
@@ -656,6 +673,11 @@
     Array.from(columnsSelect.options).forEach((option) => {
       option.disabled = false;
     });
+    wideSpecField.hidden = !wide135;
+    if (WIDE_135_SPECS[frameAspect.value]) {
+      wideSpecSelect.value = frameAspect.value;
+      frameAspect.value = "wide";
+    }
     halfFrameModeField.hidden = !halfFrame;
     if (cropped) {
       columnsSelect.disabled = true;
@@ -1084,21 +1106,24 @@
     let sprocketPitch;
     let sprocketHoleW;
     if (is120) {
-      sprocketH = Math.round(slotH * 0.09);
+      sprocketH = showSprocketHoles ? Math.round(slotH * 0.09) : 0;
       textH = Math.round(slotH * TUNE.band120);
-      textSprocketShift = Math.min(Math.round(slotH * TUNE.textSprocketGap120), textH);
+      textSprocketShift = showSprocketHoles
+        ? Math.min(Math.round(slotH * TUNE.textSprocketGap120), textH)
+        : 0;
       bandH = Math.max(sprocketH + textH - textSprocketShift, Math.round(slotH * 0.02));
       stripPadX = Math.round(slotH * 0.05);
       sprocketPitch = slotH * (4.75 / 56);
       sprocketHoleW = Math.round(slotH * (2.8 / 56));
     } else {
-      bandH = Math.round(pxPerMm135 * (FILM_135.filmHeightMm - FILM_135.imageHeightMm) / 2);
-      textH = Math.min(Math.round(baseFrameW * TUNE.textH), Math.round(bandH * 0.48));
-      sprocketH = Math.min(Math.round(baseFrameW * TUNE.sprocketH), Math.round(bandH * 0.72));
-      textSprocketShift = Math.max(0, sprocketH + textH - bandH);
+      const minimumBandH = Math.round(pxPerMm135 * (FILM_135.filmHeightMm - FILM_135.imageHeightMm) / 2);
+      textH = Math.round(baseFrameW * TUNE.textH);
+      sprocketH = Math.round(baseFrameW * TUNE.sprocketH);
+      textSprocketShift = Math.min(Math.round(baseFrameW * TUNE.textSprocketGap), textH);
+      bandH = Math.max(sprocketH + textH - textSprocketShift, minimumBandH);
       stripPadX = Math.round(baseFrameW * 0.085);
       sprocketPitch = pxPerMm135 * FILM_135.sprocketPitchMm;
-      sprocketHoleW = Math.round(pxPerMm135 * FILM_135.sprocketHoleWidthMm);
+      sprocketHoleW = Math.round(baseFrameW * TUNE.holeW);
     }
 
     const leaderAdvance = isCroppedHalfFrame
@@ -1162,7 +1187,20 @@
       const leader = options.showLeader && rowIdx === 0;
       const capacity = leader ? options.leaderCapacity : options.normalCapacity;
       const count = Math.min(capacity, itemCount - index);
-      rows.push({ start: index, count, capacity, leader, trailer: false, trimmed: false });
+      const contentWidth = count
+        ? count * options.slotW + (count - 1) * options.slotGap
+        : 0;
+      const usedWidth = (leader ? options.leaderAdvance : 0) + contentWidth;
+      rows.push({
+        start: index,
+        count,
+        capacity,
+        leader,
+        trailer: false,
+        trimmed: false,
+        usedWidth,
+        stripW: options.stripPadX * 2 + usedWidth,
+      });
       index += count;
       rowIdx += 1;
     } while (index < itemCount);
@@ -1182,6 +1220,14 @@
     return { rows, stripW, stripH, canvasW, canvasH };
   }
 
+  function getRowX(layout, rowIndex, options) {
+    if (!options.isWide135 || layout.rows.length < 2) return options.sheetPad;
+
+    const firstRowOffset = layout.rows[1].stripW - layout.rows[0].stripW;
+    const baseOffset = Math.max(0, -firstRowOffset);
+    return options.sheetPad + baseOffset + (rowIndex === 0 ? firstRowOffset : 0);
+  }
+
   function drawIndex(items, options) {
     const layout = computeLayout(items.length, options);
     const isPreview = activeCanvas === previewCanvas;
@@ -1195,7 +1241,7 @@
 
     layout.rows.forEach((rowInfo, row) => {
       const rowItems = items.slice(rowInfo.start, rowInfo.start + rowInfo.count);
-      const x = options.sheetPad;
+      const x = getRowX(layout, row, options);
       const y = options.sheetPad + row * (layout.stripH + options.rowGap);
       drawFilmRow(rowItems, rowInfo, x, y, layout, row, options, isPreview);
     });
@@ -1218,14 +1264,12 @@
 
   function drawFilmRow(items, rowInfo, x, y, layout, rowIndex, options, isPreview) {
     const stripH = layout.stripH;
-    const contentWidth = rowInfo.count
-      ? rowInfo.count * options.slotW + (rowInfo.count - 1) * options.slotGap
-      : 0;
-    const usedWidth = (rowInfo.leader ? options.leaderAdvance : 0) + contentWidth;
-    // 未填满的末行在最后一帧后截断；trailer 仅控制模拟片尾的剪切外观
-    const stripW = rowInfo.trimmed
-      ? options.stripPadX * 2 + usedWidth
-      : layout.stripW;
+    // 宽幅每行在最后一帧后结束；其他格式保留原有末行截断规则
+    const stripW = options.isWide135
+      ? rowInfo.stripW
+      : rowInfo.trimmed
+        ? rowInfo.stripW
+        : layout.stripW;
 
     // 胶片条投影，让条从纸面上"浮"起来
     ctx.save();
@@ -1260,8 +1304,6 @@
     sheen.addColorStop(1, "rgba(255, 250, 235, 0)");
     ctx.fillStyle = sheen;
     ctx.fillRect(x, y, stripW, stripH);
-
-    drawFilmTexture(x, y, stripW, stripH, rowIndex);
 
     if (rowInfo.leader) {
       drawLeaderZone(x, y, stripH, options);
@@ -1473,19 +1515,6 @@
     }
     ctx.drawImage(item.source, drawX, drawY, drawW, drawH);
     ctx.globalAlpha = 1;
-
-    const vignette = ctx.createRadialGradient(
-      central.x + central.w / 2,
-      central.y + central.h / 2,
-      Math.min(central.w, central.h) * 0.42,
-      central.x + central.w / 2,
-      central.y + central.h / 2,
-      Math.hypot(central.w, central.h) / 2,
-    );
-    vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
-    vignette.addColorStop(1, "rgba(10, 6, 2, 0.22)");
-    ctx.fillStyle = vignette;
-    ctx.fillRect(central.x, central.y, central.w, central.h);
     ctx.restore();
 
     roundedRect(ctx, central.x + 0.5, central.y + 0.5, central.w - 1, central.h - 1, radius);
@@ -1717,26 +1746,6 @@
     ctx.restore();
   }
 
-  // 颗粒噪点 + 细划痕（确定性伪随机，保证预览与导出一致）
-  function drawFilmTexture(x, y, width, height, rowIndex) {
-    ctx.save();
-    ctx.globalAlpha = 0.2;
-    ctx.fillStyle = "#26211c";
-    for (let i = 0; i < 90; i += 1) {
-      const px = x + deterministicNoise(i * 17 + rowIndex * 131) * width;
-      const py = y + deterministicNoise(i * 31 + rowIndex * 37) * height;
-      const size = 1 + deterministicNoise(i * 47 + rowIndex) * 2;
-      ctx.fillRect(px, py, size, size);
-    }
-    ctx.globalAlpha = 0.045;
-    ctx.fillStyle = "#fff6e0";
-    for (let i = 0; i < 3; i += 1) {
-      const sx = x + deterministicNoise(rowIndex * 53 + i * 97) * width;
-      ctx.fillRect(sx, y, 1, height);
-    }
-    ctx.restore();
-  }
-
   // 拖拽调序时的插入位置指示线
   function drawDropIndicator(layout, options) {
     const dropIndex = state.dropIndex;
@@ -1746,7 +1755,8 @@
     if (row < 0) row = layout.rows.length - 1;
     const rowInfo = layout.rows[row];
     const slot = dropIndex - rowInfo.start;
-    const frameStartX = options.sheetPad + options.stripPadX;
+    const rowX = getRowX(layout, row, options);
+    const frameStartX = rowX + options.stripPadX;
     const contentStartX = getRowContentStartX(frameStartX, rowInfo, options);
     const lineX = getSlotX(contentStartX, slot, options) - options.slotGap / 2;
     const frameY = options.sheetPad + row * (layout.stripH + options.rowGap) + options.bandH;

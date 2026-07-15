@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   2. 控件变化触发 `scheduleRender()`（80ms 防抖）→ `render()` → `drawIndex()` 在 canvas 上重新绘制整张索引图
   3. 导出时 `exportIndexImage()` 先用 `computeLayout()` 校验画布尺寸不超过浏览器上限（`MAX_CANVAS_SIDE`/`MAX_CANVAS_AREA`），再临时把 `activeCanvas`/`ctx` 切换到一个离屏 canvas，按导出倍率（1x/2x/3x）重新绘制，`toBlob` 下载，最后切回预览 canvas
 
-- 绘制是分层函数：`drawIndex`（整体布局）→ `drawFilmRow`（每行胶片条：投影、片基渐变、光泽、颗粒/划痕纹理）→ `drawFrame`（画面 + 暗角）/ `drawBlankFrame` / `drawSprockets`（齿孔）/ `drawEdgeTextTop`（型号边字）/ `drawEdgeTextBottom`（帧号边字）
+- 绘制是分层函数：`drawIndex`（整体布局）→ `drawFilmRow`（每行胶片条：投影、片基渐变、光泽）→ `drawFrame`（画面）/ `drawBlankFrame` / `drawSprockets`（齿孔）/ `drawEdgeTextTop`（型号边字）/ `drawEdgeTextBottom`（帧号边字）
 
 - 上下带按分区排布：外侧边字带（`textH`）+ 内侧齿孔带（`sprocketH`），齿孔带向外缘收紧 `textSprocketShift` 后两者之和为 `bandH`，都在 `getRenderOptions` 中派生。齿孔/边字的比例系数集中在 `TUNE` 常量里，侧栏"高级设置"菜单（默认收起，`setupTunePanel` 渲染进 `#tuneFields`）提供滑块实时调整
 
@@ -33,7 +33,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 图片对象以 `item.originalSource` 保存稳定的 EXIF 校正原图，`item.editSource` 保存用户裁切基线，`item.source` 是当前模式派生的渲染源；绘制尺寸统一读 `item.width`/`item.height`，不要用 `naturalWidth`
   - 自动方向旋转与用户显式旋转分离：模式重建不能累计旋转，异步结果必须用 `state.reprocessGeneration` / `item.editVersion` 防止旧任务覆盖新状态
   - 移除图片时必须走 `releaseItem()`（按身份去重关闭 original/edit/render ImageBitmap、revoke 缩略图 objectURL），避免内存泄漏
-  - 噪点用 `deterministicNoise()`（sin 伪随机），保证预览和导出结果一致，不要换成 `Math.random()`
+  - 需要伪随机变化的绘制使用 `deterministicNoise()`（sin 伪随机），保证预览和导出结果一致，不要换成 `Math.random()`
   - 预览缩放只改 canvas 的 CSS 尺寸（`applyPreviewZoom`），不影响绘制分辨率
   - `document` 级别的 dragover/drop 已 `preventDefault`，防止拖拽错位时浏览器跳转丢失页面；`fileInput.value` 在每次导入后重置以支持重复选择同一文件
 

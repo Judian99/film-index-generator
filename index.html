@@ -155,10 +155,18 @@
               <option value="645">6×4.5 中画幅（竖幅）</option>
               <option value="67">6×7 中画幅</option>
               <option value="69">6×9 中画幅 84×56</option>
-              <option value="xpan">XPan 135 宽幅 65×24</option>
-              <option value="135-69">135 宽幅 84×24（6×9 相机）</option>
+              <option value="wide">135 宽幅</option>
+              <option value="xpan" hidden>XPan 135 宽幅 65×24（兼容）</option>
+              <option value="135-69" hidden>135 宽幅 84×24（兼容）</option>
               <option value="612">6×12 宽幅中画幅</option>
               <option value="617">6×17 宽幅中画幅</option>
+            </select>
+          </label>
+          <label class="field" id="wideSpecField" hidden>
+            <span>宽幅规格</span>
+            <select id="wideSpecSelect">
+              <option value="xpan">XPan 65×24mm（每行 3 张）</option>
+              <option value="135-69">84×24mm（6×9 相机，每行 2 张）</option>
             </select>
           </label>
           <div class="field" id="halfFrameModeField" hidden>
