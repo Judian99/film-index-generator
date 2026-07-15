@@ -2789,7 +2789,7 @@
   // ---- 百度网盘集成 ----
   const API_BASE = (typeof BAIDU_PAN_API !== 'undefined')
     ? BAIDU_PAN_API
-    : 'https://film-index-baidu-pan.workers.dev';
+    : 'https://film-index-baidu-pan.1946378724.workers.dev';
 
   const BaiduPanIntegration = {
     isLoggedIn: false,
