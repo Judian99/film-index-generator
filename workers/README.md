@@ -65,11 +65,12 @@ wrangler secret put TOKEN_ENCRYPTION_KEY
 # 可使用: openssl rand -base64 32 | cut -c1-32
 ```
 
-编辑 `wrangler.toml`，修改 `FRONTEND_URL` 为您的前端地址：
+编辑 `wrangler.toml`，分别设置授权后的前端跳转地址和 CORS 来源：
 
 ```toml
 [vars]
-FRONTEND_URL = "https://your-username.github.io/film-index-generator"
+FRONTEND_URL = "https://your-username.github.io/film-index-generator/"
+FRONTEND_ORIGIN = "https://your-username.github.io"
 ```
 
 ### 步骤 4：部署 Workers
@@ -89,7 +90,7 @@ https://film-index-baidu-pan.workers.dev
 修改主项目的 `baidu-pan-config.js`：
 
 ```javascript
-export const BAIDU_PAN_API = 'https://film-index-baidu-pan.workers.dev';
+var BAIDU_PAN_API = 'https://film-index-baidu-pan.workers.dev';
 ```
 
 ### 步骤 6：配置百度网盘回调 URL
@@ -124,7 +125,7 @@ wrangler dev
 临时修改 `baidu-pan-config.js` 指向本地：
 
 ```javascript
-export const BAIDU_PAN_API = 'http://localhost:8787';
+var BAIDU_PAN_API = 'http://localhost:8787';
 ```
 
 ### 启动前端本地服务器
@@ -152,7 +153,8 @@ http://localhost:8787/callback
 | `BAIDU_CLIENT_ID` | 百度网盘开放平台应用 ID | ✅ 必需 |
 | `BAIDU_CLIENT_SECRET` | 百度网盘开放平台应用密钥 | ✅ 必需 |
 | `TOKEN_ENCRYPTION_KEY` | Token 加密密钥（32字符） | ✅ 必需 |
-| `FRONTEND_URL` | 前端页面地址（CORS 白名单） | ✅ 必需 |
+| `FRONTEND_URL` | OAuth 成功后的完整前端跳转地址 | ✅ 必需 |
+| `FRONTEND_ORIGIN` | CORS 允许的前端来源，仅包含协议和域名 | ✅ 必需 |
 
 ---
 
@@ -198,11 +200,11 @@ http://localhost:8787/callback
 ### 3. CORS 错误
 
 **可能原因：**
-- `FRONTEND_URL` 配置不正确
+- `FRONTEND_ORIGIN` 配置不正确
 - Cookie 设置问题
 
 **解决方法：**
-- 确认 `wrangler.toml` 中的 `FRONTEND_URL` 与实际前端地址一致
+- 确认 `wrangler.toml` 中的 `FRONTEND_ORIGIN` 只包含协议和域名，不包含路径
 - 确保使用 HTTPS（生产环境）
 
 ### 4. Workers 脚本大小超限
@@ -228,7 +230,7 @@ Cloudflare Workers 免费版限制脚本大小 1MB。
    - 使用 AES-256-GCM 加密存储
    - HTTP-only Cookie 防止 XSS
    - Secure Cookie（仅 HTTPS）
-   - SameSite=Lax 防止 CSRF
+   - SameSite=None 支持 GitHub Pages 到 Worker 的跨站请求
 
 3. **最小权限**
    - 只请求 `basic` 和 `netdisk` 权限

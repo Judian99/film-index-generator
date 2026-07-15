@@ -1,5 +1,6 @@
-# Workers node_modules
-workers/node_modules/
+# Wrangler and dependencies
+node_modules/
+.wrangler/
 
 # Environment files
 .env

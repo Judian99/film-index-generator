@@ -29,7 +29,7 @@ async function getTokenFromCookie(request, encryptionKey) {
 }
 
 export async function handleDownload(request, env, ctx) {
-  const origin = env.FRONTEND_URL || '*';
+  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
   const url = new URL(request.url);
   const fsId = url.searchParams.get('fs_id');
 

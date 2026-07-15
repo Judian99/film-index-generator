@@ -4,7 +4,7 @@
  */
 
 export async function handleLogout(request, env, ctx) {
-  const origin = env.FRONTEND_URL || '*';
+  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
 
   const response = new Response(JSON.stringify({
     logged_out: true
@@ -13,7 +13,7 @@ export async function handleLogout(request, env, ctx) {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Credentials': 'true',
-      'Set-Cookie': 'bd_token=; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Path=/'
+      'Set-Cookie': 'bd_token=; HttpOnly; Secure; SameSite=None; Max-Age=0; Path=/'
     }
   });
 

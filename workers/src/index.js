@@ -28,7 +28,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
-    const origin = env.FRONTEND_URL || '*';
+    const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
 
     // CORS 预检请求
     if (request.method === 'OPTIONS') {

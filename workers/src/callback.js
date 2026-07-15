@@ -41,21 +41,23 @@ export async function handleCallback(request, env, ctx) {
     // 重定向回前端，携带加密的 token
     const frontendUrl = env.FRONTEND_URL || '/';
 
-    const response = Response.redirect(frontendUrl, 302);
-
-    // 设置加密 token Cookie（30 天有效期）
+    // 使用 new Response 构造重定向，以便设置自定义头
     const cookieParts = [
       `bd_token=${encryptedToken}`,
       'HttpOnly',
       'Secure',
-      'SameSite=Lax',
+      'SameSite=None',
       `Max-Age=${tokenData.expires_in || 2592000}`,
       'Path=/'
     ];
 
-    response.headers.set('Set-Cookie', cookieParts.join('; '));
-
-    return response;
+    return new Response(null, {
+      status: 302,
+      headers: {
+        'Location': frontendUrl,
+        'Set-Cookie': cookieParts.join('; ')
+      }
+    });
 
   } catch (error) {
     console.error('Callback error:', error);

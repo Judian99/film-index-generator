@@ -29,7 +29,7 @@ async function getTokenFromCookie(request, encryptionKey) {
 }
 
 export async function handleStatus(request, env, ctx) {
-  const origin = env.FRONTEND_URL || '*';
+  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
 
   try {
     // 获取 token
