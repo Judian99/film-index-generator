@@ -41,22 +41,12 @@ export async function exchangeToken(code, clientId, clientSecret, redirectUri) {
     redirect_uri: redirectUri
   });
 
-  const response = await fetch(BAIDU_API.TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: params.toString()
-  });
+  const response = await fetch(`${BAIDU_API.TOKEN_URL}?${params.toString()}`);
+  const data = await response.json().catch(() => ({}));
 
-  if (!response.ok) {
-    throw new Error(`Token exchange failed: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  if (data.error) {
-    throw new Error(`Token exchange error: ${data.error_description || data.error}`);
+  if (!response.ok || data.error) {
+    const reason = data.error_description || data.error || `HTTP ${response.status}`;
+    throw new Error(`Token exchange error: ${reason}`);
   }
 
   return data;
