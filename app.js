@@ -2961,6 +2961,12 @@
         const dirs = data.files.filter(f => f.is_dir);
         const images = data.files.filter(f => !f.is_dir && f.is_image);
 
+        if (dirs.length === 0 && images.length === 0) {
+          empty.textContent = '此目录没有可导入的图片';
+          empty.hidden = false;
+          return;
+        }
+
         dirs.forEach(dir => {
           const item = this.createGridItem(dir, true);
           grid.appendChild(item);

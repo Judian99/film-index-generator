@@ -67,7 +67,8 @@ export async function handleFiles(request, env, ctx) {
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.raw', '.tiff', '.tif'];
     const imageFiles = (fileList.list || []).map(file => {
       const filename = file.server_filename || file.filename || file.path?.split('/').pop() || '';
-      const isImage = imageExtensions.some(ext =>
+      const isDir = Number(file.isdir ?? file.is_dir) === 1;
+      const isImage = !isDir && imageExtensions.some(ext =>
         filename.toLowerCase().endsWith(ext)
       );
 
@@ -75,7 +76,7 @@ export async function handleFiles(request, env, ctx) {
         fs_id: file.fs_id,
         path: file.path,
         filename,
-        is_dir: file.is_dir === 1,
+        is_dir: isDir,
         size: file.size,
         server_mtime: file.server_mtime,
         is_image: isImage
