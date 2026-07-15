@@ -66,14 +66,15 @@ export async function handleFiles(request, env, ctx) {
     // 过滤出图片文件（常见格式）
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.raw', '.tiff', '.tif'];
     const imageFiles = (fileList.list || []).map(file => {
+      const filename = file.server_filename || file.filename || file.path?.split('/').pop() || '';
       const isImage = imageExtensions.some(ext =>
-        file.filename.toLowerCase().endsWith(ext)
+        filename.toLowerCase().endsWith(ext)
       );
 
       return {
         fs_id: file.fs_id,
         path: file.path,
-        filename: file.filename,
+        filename,
         is_dir: file.is_dir === 1,
         size: file.size,
         server_mtime: file.server_mtime,
