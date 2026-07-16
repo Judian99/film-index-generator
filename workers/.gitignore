@@ -1,5 +1,8 @@
-# Wrangler and dependencies
+# EdgeOne CLI and dependencies
 node_modules/
+.edgeone/
+
+# Legacy local Cloudflare state
 .wrangler/
 
 # Environment files

@@ -1,56 +1,27 @@
-/**
- * 登录状态检查
- * 返回用户信息和登录状态
- */
-
 import { getUserInfo } from './lib/baidu-pan.js';
-import { decryptToken } from './lib/crypto.js';
+import { requireSession } from './lib/auth-session.js';
+import { jsonResponse } from './lib/http.js';
 
-/**
- * 从 Cookie 中提取并解密 token
- */
-async function getTokenFromCookie(request, encryptionKey) {
-  const cookieHeader = request.headers.get('Cookie') || '';
-  const match = cookieHeader.match(/bd_token=([^;]+)/);
+export async function handleStatus(request, env) {
+  if (request.method !== 'GET') {
+    return jsonResponse(request, env, 405, {
+      error: 'Method not allowed',
+      code: 'METHOD_NOT_ALLOWED'
+    });
+  }
 
-  if (!match) {
-    return null;
+  const auth = await requireSession(request, env);
+  if (auth.error) {
+    return jsonResponse(request, env, 200, {
+      logged_in: false,
+      user: null,
+      code: auth.error
+    });
   }
 
   try {
-    const encryptedToken = match[1];
-    const decryptedPayload = await decryptToken(encryptedToken, encryptionKey);
-    const tokenData = JSON.parse(decryptedPayload);
-    return tokenData;
-  } catch (error) {
-    console.error('Token decryption failed:', error);
-    return null;
-  }
-}
-
-export async function handleStatus(request, env, ctx) {
-  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
-
-  try {
-    // 获取 token
-    const tokenData = await getTokenFromCookie(request, env.TOKEN_ENCRYPTION_KEY);
-
-    if (!tokenData || !tokenData.access_token) {
-      return new Response(JSON.stringify({
-        logged_in: false,
-        user: null
-      }), {
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders(origin)
-        }
-      });
-    }
-
-    // 获取用户信息
-    const userInfo = await getUserInfo(tokenData.access_token);
-
-    return new Response(JSON.stringify({
+    const userInfo = await getUserInfo(auth.accessToken);
+    return jsonResponse(request, env, 200, {
       logged_in: true,
       user: {
         baidu_name: userInfo.baidu_name,
@@ -60,31 +31,13 @@ export async function handleStatus(request, env, ctx) {
         total_quota: userInfo.total,
         used_quota: userInfo.used
       }
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(origin)
-      }
     });
-
   } catch (error) {
-    console.error('Status check error:', error);
-
-    return new Response(JSON.stringify({
+    console.error('Baidu status upstream failed');
+    return jsonResponse(request, env, 200, {
       logged_in: false,
-      error: error.message
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(origin)
-      }
+      user: null,
+      code: 'BAIDU_AUTH_EXPIRED'
     });
   }
-}
-
-function corsHeaders(origin) {
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Credentials': 'true'
-  };
 }

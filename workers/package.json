@@ -1,20 +1,19 @@
 {
   "name": "film-index-baidu-pan",
   "version": "1.0.0",
-  "description": "Cloudflare Workers API proxy for Baidu Pan integration",
+  "description": "EdgeOne Pages Functions proxy for Baidu Pan integration",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "tail": "wrangler tail",
+    "edgeone:dev": "edgeone makers dev",
+    "edgeone:deploy": "edgeone makers deploy",
     "test": "node --test"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "edgeone": "^1.6.14"
   },
   "keywords": [
-    "cloudflare-workers",
+    "edgeone-pages",
     "baidu-pan",
     "oauth"
   ],

@@ -1,16 +1,12 @@
-/**
- * Token 加密工具
- * 使用 Web Crypto API 进行 AES-GCM 加密/解密
- */
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
-/**
- * 从密钥字符串生成 CryptoKey
- */
 async function getEncryptionKey(keyString) {
-  const encoder = new TextEncoder();
   const keyData = encoder.encode(keyString);
-
-  return await crypto.subtle.importKey(
+  if (keyData.byteLength !== 32) {
+    throw new Error('TOKEN_ENCRYPTION_KEY must be exactly 32 UTF-8 bytes');
+  }
+  return crypto.subtle.importKey(
     'raw',
     keyData,
     { name: 'AES-GCM', length: 256 },
@@ -19,61 +15,79 @@ async function getEncryptionKey(keyString) {
   );
 }
 
-/**
- * 加密 Token
- * @param {string} token - 要加密的 token
- * @param {string} encryptionKey - 加密密钥（32字符）
- * @returns {Promise<string>} Base64 编码的加密数据
- */
+function toBase64Url(bytes) {
+  let value = '';
+  bytes.forEach(byte => {
+    value += String.fromCharCode(byte);
+  });
+  return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function fromBase64Url(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error('Invalid encrypted value');
+  }
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, character => character.charCodeAt(0));
+}
+
+export function randomToken(byteLength = 32) {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(byteLength)));
+}
+
+export async function sha256Challenge(value) {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value));
+  return toBase64Url(new Uint8Array(digest));
+}
+
 export async function encryptToken(token, encryptionKey) {
   const key = await getEncryptionKey(encryptionKey);
-  const encoder = new TextEncoder();
-  const data = encoder.encode(token);
-
-  // 生成随机 IV
   const iv = crypto.getRandomValues(new Uint8Array(12));
-
-  // 加密
   const encrypted = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
     key,
-    data
+    encoder.encode(token)
   );
-
-  // 合并 IV 和加密数据
   const combined = new Uint8Array(iv.length + encrypted.byteLength);
-  combined.set(iv, 0);
+  combined.set(iv);
   combined.set(new Uint8Array(encrypted), iv.length);
-
-  // 转为 Base64
-  return btoa(String.fromCharCode(...combined));
+  return toBase64Url(combined);
 }
 
-/**
- * 解密 Token
- * @param {string} encryptedToken - Base64 编码的加密数据
- * @param {string} encryptionKey - 解密密钥（32字符）
- * @returns {Promise<string>} 解密后的 token
- */
 export async function decryptToken(encryptedToken, encryptionKey) {
   const key = await getEncryptionKey(encryptionKey);
-
-  // Base64 解码
-  const combined = new Uint8Array(
-    atob(encryptedToken).split('').map(c => c.charCodeAt(0))
-  );
-
-  // 分离 IV 和加密数据
-  const iv = combined.slice(0, 12);
-  const encrypted = combined.slice(12);
-
-  // 解密
+  const combined = fromBase64Url(encryptedToken);
+  if (combined.byteLength <= 28) throw new Error('Invalid encrypted value');
   const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv: combined.slice(0, 12) },
     key,
-    encrypted
+    combined.slice(12)
   );
-
-  const decoder = new TextDecoder();
   return decoder.decode(decrypted);
+}
+
+export async function sealPayload(payload, purpose, encryptionKey) {
+  const value = {
+    ...payload,
+    version: 1,
+    purpose
+  };
+  return encryptToken(JSON.stringify(value), encryptionKey);
+}
+
+export async function openPayload(value, purpose, encryptionKey, now = Date.now()) {
+  const payload = JSON.parse(await decryptToken(value, encryptionKey));
+  if (
+    payload?.version !== 1 ||
+    payload?.purpose !== purpose ||
+    !Number.isFinite(payload.issuedAt) ||
+    !Number.isFinite(payload.expiresAt) ||
+    payload.issuedAt > now + 60_000 ||
+    payload.expiresAt <= now
+  ) {
+    throw new Error(`Invalid or expired ${purpose}`);
+  }
+  return payload;
 }

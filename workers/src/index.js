@@ -3,6 +3,7 @@
  */
 
 import { handleAuth } from './auth.js';
+import { handleAuthExchange } from './auth-exchange.js';
 import { handleCallback } from './callback.js';
 import { handleStatus } from './status.js';
 import { handleFiles } from './files.js';
@@ -13,13 +14,17 @@ import { handleLogout } from './logout.js';
 /**
  * 生成 CORS 响应头
  */
-function corsHeaders(origin) {
-  return {
-    'Access-Control-Allow-Origin': origin,
+function corsHeaders(request, origin) {
+  const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Credentials': 'true'
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Max-Age': '600',
+    'Vary': 'Origin'
   };
+  if (request.headers.get('Origin') === origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+  }
+  return headers;
 }
 
 /**
@@ -35,7 +40,7 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
-        headers: corsHeaders(origin)
+        headers: corsHeaders(request, origin)
       });
     }
 
@@ -44,6 +49,9 @@ export default {
       switch (path) {
         case '/auth':
           return handleAuth(request, env, ctx);
+
+        case '/auth/exchange':
+          return handleAuthExchange(request, env, ctx);
 
         case '/callback':
           return handleCallback(request, env, ctx);
@@ -68,7 +76,7 @@ export default {
             status: 404,
             headers: {
               'Content-Type': 'application/json',
-              ...corsHeaders(origin)
+              ...corsHeaders(request, origin)
             }
           });
       }
@@ -78,7 +86,7 @@ export default {
         status: 500,
         headers: {
           'Content-Type': 'application/json',
-          ...corsHeaders(origin)
+          ...corsHeaders(request, origin)
         }
       });
     }

@@ -1,17 +1,15 @@
 @echo off
 chcp 65001 >nul
 echo.
-echo ===== 百度网盘开放平台配置 =====
+echo ===== EdgeOne Pages 百度网盘后端 =====
 echo.
-echo 请确保已在百度开放平台创建应用并配置 Worker 回调地址。
+echo 1. npm install
+echo 2. npx edgeone login
+echo 3. npx edgeone makers init
+echo 4. npx edgeone makers link
+echo 5. 在 EdgeOne 控制台配置 README.md 列出的环境变量
+echo 6. npm test ^&^& npm run edgeone:deploy
 echo.
-echo 设置 Cloudflare Workers Secrets：
-echo   npx wrangler secret put BAIDU_CLIENT_ID
-echo   npx wrangler secret put BAIDU_CLIENT_SECRET
-echo   npx wrangler secret put TOKEN_ENCRYPTION_KEY
-echo.
-echo TOKEN_ENCRYPTION_KEY 必须是随机生成的 32 字节密钥。
-echo 设置完成后运行：
-echo   npx wrangler deploy
+echo 不要将百度 Secret 或 TOKEN_ENCRYPTION_KEY 写入仓库或命令历史。
 echo.
 pause
