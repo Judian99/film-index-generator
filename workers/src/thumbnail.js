@@ -83,12 +83,15 @@ export async function handleThumbnail(request, env, ctx) {
   try {
     const response = await fetch(sourceUrl, {
       headers: {
+        'Accept': 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8',
         'User-Agent': 'LogStats'
       },
-      redirect: 'follow'
+      redirect: 'follow',
+      signal: request.signal
     });
 
     if (!response.ok) {
+      console.error('Thumbnail upstream failed', { status: response.status });
       return jsonResponse(origin, 502, 'Thumbnail unavailable', 'THUMBNAIL_UPSTREAM_FAILED');
     }
 
@@ -97,6 +100,7 @@ export async function handleThumbnail(request, env, ctx) {
       .trim()
       .toLowerCase();
     if (!ALLOWED_IMAGE_TYPES.has(contentType)) {
+      console.error('Thumbnail upstream returned unsupported content', { contentType });
       return jsonResponse(origin, 502, 'Unsupported thumbnail response', 'THUMBNAIL_UPSTREAM_FAILED');
     }
 

@@ -72,35 +72,63 @@ export async function getUserInfo(accessToken) {
   return data;
 }
 
-/**
- * 获取文件列表
- */
-export async function listFiles(accessToken, path = '/', page = 1, num = 100, order = 'name', desc = 0) {
-  const params = new URLSearchParams({
-    method: 'list',
-    access_token: accessToken,
-    dir: path,
-    page: page,
-    num: num,
-    order: order,
-    desc: desc,
-    web: 1
+async function requestFileApi(operation, path, params) {
+  const url = new URL(BAIDU_API.FILE_LIST);
+  Object.entries(params).forEach(([key, value]) => {
+    url.searchParams.set(key, String(value));
   });
 
-  const url = `${BAIDU_API.FILE_LIST}?${params.toString()}`;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`List files failed: ${response.status}`);
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    const upstreamError = new Error(`Baidu ${operation} request failed`);
+    upstreamError.operation = operation;
+    upstreamError.path = path;
+    upstreamError.cause = error;
+    throw upstreamError;
   }
 
-  const data = await response.json();
-
-  if (data.errno !== 0) {
-    throw new Error(`API error: ${data.errmsg || data.errno}`);
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data || data.errno !== 0) {
+    const reason = data?.errmsg || data?.errno || `HTTP ${response.status}`;
+    const upstreamError = new Error(`Baidu ${operation} failed: ${reason}`);
+    upstreamError.operation = operation;
+    upstreamError.path = path;
+    upstreamError.status = response.status;
+    upstreamError.errno = data?.errno;
+    throw upstreamError;
   }
 
   return data;
+}
+
+/**
+ * 获取通用文件列表
+ */
+export async function listFiles(accessToken, path = '/', page = 1, num = 1000, order = 'name', desc = 0) {
+  return requestFileApi('list', path, {
+    method: 'list',
+    access_token: accessToken,
+    dir: path,
+    page,
+    num,
+    order,
+    desc
+  });
+}
+
+/**
+ * 获取目录下的图片及缩略图
+ */
+export async function listImages(accessToken, path = '/') {
+  return requestFileApi('imagelist', path, {
+    method: 'imagelist',
+    access_token: accessToken,
+    parent_path: path,
+    recursion: 0,
+    web: 1
+  });
 }
 
 /**

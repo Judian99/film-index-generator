@@ -3105,12 +3105,21 @@
     },
 
     /** 获取文件列表 */
-    async listFiles(path = '/', page = 1, num = 100, signal) {
+    async listFiles(path = '/', signal) {
       const res = await fetch(
-        `${API_BASE}/files?path=${encodeURIComponent(path)}&page=${page}&num=${num}`,
+        `${API_BASE}/files?path=${encodeURIComponent(path)}`,
         { credentials: 'include', signal }
       );
-      if (!res.ok) throw new Error(await this.responseError(res, '无法读取文件列表'));
+      if (!res.ok) {
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (error) {}
+        if (data?.code === 'NOT_AUTHENTICATED' || data?.code === 'BAIDU_AUTH_EXPIRED') {
+          this.isLoggedIn = false;
+        }
+        throw new Error(data?.error || `无法读取文件列表 (${res.status})`);
+      }
       return res.json();
     },
 
@@ -3304,7 +3313,7 @@
       error.hidden = true;
 
       try {
-        const data = await this.listFiles(normalizedPath, 1, 100, controller.signal);
+        const data = await this.listFiles(normalizedPath, controller.signal);
         if (requestId !== this.directoryRequestId) return;
         loading.hidden = true;
         grid.innerHTML = '';

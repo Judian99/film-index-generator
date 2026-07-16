@@ -2,11 +2,13 @@
   "name": "film-index-baidu-pan",
   "version": "1.0.0",
   "description": "Cloudflare Workers API proxy for Baidu Pan integration",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node --test"
   },
   "devDependencies": {
     "wrangler": "^3.0.0"
