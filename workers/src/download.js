@@ -79,6 +79,9 @@ export async function handleDownload(request, env, ctx) {
     // 流式传输到浏览器
     const headers = new Headers({
       'Content-Type': response.headers.get('Content-Type') || 'application/octet-stream',
+      'Content-Disposition': 'inline',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
       'Access-Control-Allow-Origin': origin,
       'Access-Control-Allow-Credentials': 'true'
     });

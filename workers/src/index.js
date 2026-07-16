@@ -6,6 +6,7 @@ import { handleAuth } from './auth.js';
 import { handleCallback } from './callback.js';
 import { handleStatus } from './status.js';
 import { handleFiles } from './files.js';
+import { handleThumbnail } from './thumbnail.js';
 import { handleDownload } from './download.js';
 import { handleLogout } from './logout.js';
 
@@ -52,6 +53,9 @@ export default {
 
         case '/files':
           return handleFiles(request, env, ctx);
+
+        case '/thumbnail':
+          return handleThumbnail(request, env, ctx);
 
         case '/download':
           return handleDownload(request, env, ctx);

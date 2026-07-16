@@ -1929,20 +1929,52 @@ a:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   padding: 10px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
-.baidu-pan-path {
+.baidu-pan-up {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 6px 9px;
+}
+
+.baidu-pan-breadcrumb {
   min-width: 0;
-  overflow: hidden;
-  font-size: 12px;
-  color: var(--muted);
-  font-family: monospace;
-  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: thin;
   white-space: nowrap;
+}
+
+.baidu-pan-breadcrumb-segment {
+  border: 0;
+  padding: 4px 5px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.baidu-pan-breadcrumb-segment:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.baidu-pan-breadcrumb-segment:focus-visible,
+.baidu-pan-up:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.baidu-pan-breadcrumb-separator {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .baidu-pan-select-all {
@@ -2046,6 +2078,32 @@ a:focus-visible {
 
 .baidu-pan-item-icon {
   font-size: 32px;
+}
+
+.baidu-pan-thumbnail-error {
+  max-width: 90%;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #b42318;
+}
+
+.photo-quality {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.photo-quality-loading {
+  color: var(--accent);
+}
+
+.photo-quality-error {
+  color: #b42318;
 }
 
 .baidu-pan-item-checkbox {

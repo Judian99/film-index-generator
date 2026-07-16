@@ -4,7 +4,7 @@
  */
 
 import { listFiles } from './lib/baidu-pan.js';
-import { decryptToken } from './lib/crypto.js';
+import { decryptToken, encryptToken } from './lib/crypto.js';
 
 /**
  * 从 Cookie 中提取并解密 token
@@ -63,14 +63,34 @@ export async function handleFiles(request, env, ctx) {
       0
     );
 
-    // 过滤出图片文件（常见格式）
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.raw', '.tiff', '.tif'];
-    const imageFiles = (fileList.list || []).map(file => {
+    // 与浏览器实际支持的格式保持一致
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const accountFingerprint = await tokenFingerprint(tokenData.access_token);
+    const imageFiles = await Promise.all((fileList.list || []).map(async file => {
       const filename = file.server_filename || file.filename || file.path?.split('/').pop() || '';
       const isDir = Number(file.isdir ?? file.is_dir) === 1;
       const isImage = !isDir && imageExtensions.some(ext =>
         filename.toLowerCase().endsWith(ext)
       );
+      const rawSourceUrl = isImage
+        ? file.thumbs?.url2 || file.thumbs?.url1 || file.thumbs?.url3 || null
+        : null;
+      const sourceUrl = rawSourceUrl?.replace(/^http:\/\//i, 'https://') || null;
+      let thumbnailUrl = null;
+
+      if (sourceUrl) {
+        const ticket = await encryptToken(JSON.stringify({
+          version: 1,
+          purpose: 'baidu-thumbnail',
+          fsId: String(file.fs_id),
+          accountFingerprint,
+          sourceUrl,
+          expiresAt: Date.now() + 60 * 60 * 1000
+        }), env.TOKEN_ENCRYPTION_KEY);
+        const proxyUrl = new URL('/thumbnail', request.url);
+        proxyUrl.searchParams.set('ticket', ticket);
+        thumbnailUrl = proxyUrl.toString();
+      }
 
       return {
         fs_id: file.fs_id,
@@ -80,11 +100,9 @@ export async function handleFiles(request, env, ctx) {
         size: file.size,
         server_mtime: file.server_mtime,
         is_image: isImage,
-        thumbnail_url: isImage
-          ? file.thumbs?.url2 || file.thumbs?.url1 || file.thumbs?.url3 || null
-          : null
+        thumbnail_url: thumbnailUrl
       };
-    });
+    }));
 
     return new Response(JSON.stringify({
       path: path,
@@ -112,6 +130,12 @@ export async function handleFiles(request, env, ctx) {
       }
     });
   }
+}
+
+async function tokenFingerprint(accessToken) {
+  const data = new TextEncoder().encode(accessToken);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function corsHeaders(origin) {

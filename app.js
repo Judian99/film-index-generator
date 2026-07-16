@@ -101,6 +101,10 @@
     reprocessGeneration: 0,
     manual135Columns: Number(columnsSelect.value) || 6,
     manualHalfColumns: Math.max(4, Number(columnsSelect.value) || 6),
+    sortMode: document.querySelector("input[name='sortMode']:checked").value,
+    exportHydrationItems: null,
+    sourceCommitPromise: Promise.resolve(),
+    isExporting: false,
   };
 
   // ---- 胶卷型号：内置与自定义同构的型号对象，按冲洗工艺分档取默认外观 ----
@@ -349,8 +353,26 @@
     });
   });
 
-  document.querySelectorAll("input[name='sortMode']").forEach((control) => {
-    control.addEventListener("change", () => {
+  const sortControls = Array.from(document.querySelectorAll("input[name='sortMode']"));
+  sortControls.forEach((control) => {
+    control.addEventListener("change", async (event) => {
+      const nextMode = event.currentTarget.value;
+      const previousMode = state.sortMode;
+      if (nextMode === "time") {
+        const previous = document.querySelector(`input[name='sortMode'][value='${previousMode}']`);
+        if (previous) previous.checked = true;
+        sortControls.forEach((input) => { input.disabled = true; });
+        const failures = await ensureAllOriginals([...state.items], "按拍摄时间排序");
+        sortControls.forEach((input) => { input.disabled = false; });
+        if (failures.length) {
+          showNotice(`无法读取 ${failures.length} 张原图，已保留原排序`);
+          render();
+          renderPhotoList();
+          return;
+        }
+        event.currentTarget.checked = true;
+      }
+      state.sortMode = nextMode;
       scheduleRender();
       renderPhotoList();
     });
@@ -409,9 +431,13 @@
 
   zoomFit.addEventListener("click", fitPreviewToViewport);
 
-  exportButton.addEventListener("click", () => {
+  exportButton.addEventListener("click", async () => {
     if (!state.items.length) return;
-    exportIndexImage();
+    if (state.isExporting) {
+      cancelOriginalDownloads(state.exportHydrationItems || state.items);
+      return;
+    }
+    await exportIndexImage();
   });
 
   clearButton.addEventListener("click", () => {
@@ -775,9 +801,206 @@
       modified: file.lastModified || 0,
       taken,
       thumbUrl: URL.createObjectURL(file),
+      ownsThumbUrl: true,
     };
     await rebuildItemSource(item, state.reprocessGeneration, item.editVersion);
     return item;
+  }
+
+  async function readRemotePreview(descriptor, blob) {
+    const originalSource = await decodeImage(blob);
+    const thumbUrl = URL.createObjectURL(blob);
+    const item = {
+      id: state.nextId++,
+      file: null,
+      originalSource,
+      originalWidth: originalSource.width,
+      originalHeight: originalSource.height,
+      editSource: null,
+      editWidth: originalSource.width,
+      editHeight: originalSource.height,
+      manualTurns: 0,
+      autoTurns: 0,
+      editVersion: 0,
+      source: originalSource,
+      width: originalSource.width,
+      height: originalSource.height,
+      name: descriptor.filename,
+      modified: Number(descriptor.server_mtime || 0) * 1000,
+      taken: null,
+      thumbUrl,
+      ownsThumbUrl: true,
+      remote: {
+        descriptor,
+        quality: "preview",
+        hydrationPromise: null,
+        abortController: null,
+        revision: 0,
+      },
+    };
+    await rebuildItemSource(item, state.reprocessGeneration, item.editVersion);
+    return item;
+  }
+
+  function mimeTypeForRemoteFile(descriptor, responseType) {
+    const type = (responseType || "").split(";", 1)[0].trim().toLowerCase();
+    if (/^image\/(jpeg|png|webp)$/.test(type)) return type;
+    if (type && type !== "application/octet-stream") return null;
+    const name = descriptor.filename.toLowerCase();
+    if (/\.jpe?g$/.test(name)) return "image/jpeg";
+    if (name.endsWith(".png")) return "image/png";
+    if (name.endsWith(".webp")) return "image/webp";
+    return null;
+  }
+
+  function serializeSourceCommit(commit) {
+    const queued = state.sourceCommitPromise.then(commit, commit);
+    state.sourceCommitPromise = queued.catch(() => {});
+    return queued;
+  }
+
+  async function ensureOriginal(item, reason = "操作") {
+    if (!item.remote || item.remote.quality === "full") return item;
+    if (item.remote.hydrationPromise) return item.remote.hydrationPromise;
+
+    const remote = item.remote;
+    const revision = remote.revision;
+    const controller = new AbortController();
+    remote.abortController = controller;
+    remote.quality = "loading";
+    renderPhotoList();
+
+    remote.hydrationPromise = (async () => {
+      let fullSource = null;
+      try {
+        const blob = await BaiduPanIntegration.downloadFile(remote.descriptor.fs_id, controller.signal);
+        const mimeType = mimeTypeForRemoteFile(remote.descriptor, blob.type);
+        if (!mimeType) throw new Error("不支持的图片格式");
+        const file = new File([blob], remote.descriptor.filename, {
+          type: mimeType,
+          lastModified: Number(remote.descriptor.server_mtime || 0) * 1000,
+        });
+        const result = await Promise.all([
+          decodeImage(file),
+          readExifDate(file).catch(() => null),
+        ]);
+        fullSource = result[0];
+        const taken = result[1];
+        if (
+          controller.signal.aborted ||
+          remote.revision !== revision ||
+          !state.items.includes(item)
+        ) {
+          closeSource(fullSource);
+          throw new DOMException("Aborted", "AbortError");
+        }
+
+        await serializeSourceCommit(async () => {
+          if (
+            controller.signal.aborted ||
+            remote.revision !== revision ||
+            !state.items.includes(item)
+          ) {
+            throw new DOMException("Aborted", "AbortError");
+          }
+          const candidate = {
+            ...item,
+            file,
+            originalSource: fullSource,
+            originalWidth: fullSource.width,
+            originalHeight: fullSource.height,
+            editSource: null,
+            editWidth: fullSource.width,
+            editHeight: fullSource.height,
+            source: fullSource,
+            width: fullSource.width,
+            height: fullSource.height,
+            taken,
+            editVersion: item.editVersion + 1,
+          };
+          let rebuilt = false;
+          while (!rebuilt && !controller.signal.aborted) {
+            const generation = ++state.reprocessGeneration;
+            rebuilt = await rebuildItemSource(candidate, generation, candidate.editVersion);
+          }
+          if (
+            !rebuilt ||
+            controller.signal.aborted ||
+            remote.revision !== revision ||
+            !state.items.includes(item)
+          ) {
+            closeDistinctSources(candidate.source, fullSource);
+            fullSource = null;
+            throw new DOMException("Aborted", "AbortError");
+          }
+
+          const previewOriginal = item.originalSource;
+          const previewSource = item.source;
+          item.file = candidate.file;
+          item.originalSource = candidate.originalSource;
+          item.originalWidth = candidate.originalWidth;
+          item.originalHeight = candidate.originalHeight;
+          item.editSource = null;
+          item.editWidth = candidate.editWidth;
+          item.editHeight = candidate.editHeight;
+          item.source = candidate.source;
+          item.width = candidate.width;
+          item.height = candidate.height;
+          item.taken = candidate.taken;
+          item.editVersion = candidate.editVersion;
+          item.autoTurns = candidate.autoTurns;
+          remote.quality = "full";
+          fullSource = null;
+          closeDistinctSources(previewSource, previewOriginal);
+        });
+        render();
+        renderPhotoList();
+        return item;
+      } catch (error) {
+        if (fullSource && item.originalSource !== fullSource) closeSource(fullSource);
+        if (error.name !== "AbortError" && remote.revision === revision) {
+          remote.quality = "error";
+          renderPhotoList();
+        } else if (remote.revision === revision && remote.quality !== "full") {
+          remote.quality = "preview";
+        }
+        throw error;
+      } finally {
+        if (remote.revision === revision) {
+          remote.hydrationPromise = null;
+          remote.abortController = null;
+        }
+      }
+    })();
+
+    return remote.hydrationPromise;
+  }
+
+  async function ensureAllOriginals(items, reason) {
+    const pending = items.filter((item) => item.remote && item.remote.quality !== "full");
+    if (!pending.length) return [];
+    const failures = [];
+    let nextIndex = 0;
+    let completed = 0;
+    const worker = async () => {
+      while (nextIndex < pending.length) {
+        const item = pending[nextIndex++];
+        try {
+          await ensureOriginal(item, reason);
+        } catch (error) {
+          failures.push({ item, error });
+        } finally {
+          completed += 1;
+          statusTitle.textContent = `${reason}：正在获取原图 ${completed}/${pending.length}`;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, pending.length) }, worker));
+    return failures;
+  }
+
+  function cancelOriginalDownloads(items = state.items) {
+    items.forEach((item) => item.remote?.abortController?.abort());
   }
 
   function closeSource(source) {
@@ -1015,7 +1238,28 @@
     applyPreviewZoom();
   }
 
-  function exportIndexImage() {
+  async function exportIndexImage() {
+    const originalButtonText = exportButton.textContent;
+    state.isExporting = true;
+    state.exportHydrationItems = [...state.items];
+    exportButton.textContent = "取消原图下载";
+    const failures = await ensureAllOriginals(state.exportHydrationItems, "导出准备");
+    state.isExporting = false;
+    state.exportHydrationItems = null;
+    exportButton.textContent = originalButtonText;
+    if (failures.length) {
+      const names = failures.slice(0, 3).map(({ item }) => item.name).join("、");
+      showNotice(`导出已取消：${failures.length} 张原图获取失败${names ? `（${names}）` : ""}`);
+      render();
+      return;
+    }
+    if (state.items.some((item) => item.remote && item.remote.quality !== "full")) {
+      showNotice("导出已取消：仍有照片未获取原图");
+      render();
+      return;
+    }
+
+    render();
     const scale = clamp(Number(exportScale.value) || 1, 1, 3);
     const options = getRenderOptions(scale);
     const layout = computeLayout(state.items.length, options);
@@ -1800,6 +2044,17 @@
       name.textContent = item.name;
       name.title = item.name;
 
+      if (item.remote && item.remote.quality !== "full") {
+        const status = document.createElement("span");
+        status.className = `photo-quality photo-quality-${item.remote.quality}`;
+        status.textContent = item.remote.quality === "loading"
+          ? "下载中"
+          : item.remote.quality === "error"
+            ? "原图失败"
+            : "低清";
+        name.appendChild(status);
+      }
+
       const remove = document.createElement("button");
       remove.className = "photo-remove";
       remove.type = "button";
@@ -1862,8 +2117,12 @@
   }
 
   function releaseItem(item) {
+    if (item.remote) {
+      item.remote.revision += 1;
+      item.remote.abortController?.abort();
+    }
     closeDistinctSources(item.source, item.editSource, item.originalSource);
-    URL.revokeObjectURL(item.thumbUrl);
+    if (item.ownsThumbUrl !== false && item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
   }
 
   function showNotice(message) {
@@ -1993,9 +2252,15 @@
 
   // ---- 裁切工具：交互式裁切框 ----
 
-  function openCropModal(itemId) {
+  async function openCropModal(itemId) {
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
+    try {
+      await ensureOriginal(item, "裁切");
+    } catch (error) {
+      if (error.name !== "AbortError") showNotice(`无法获取 ${item.name} 的原图，暂不能裁切`);
+      return;
+    }
 
     cropModal.hidden = false;
     document.body.style.overflow = "hidden";
@@ -2336,6 +2601,12 @@
   async function rotateItem(itemId) {
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
+    try {
+      await ensureOriginal(item, "旋转");
+    } catch (error) {
+      if (error.name !== "AbortError") showNotice(`无法获取 ${item.name} 的原图，暂不能旋转`);
+      return;
+    }
     item.manualTurns = (item.manualTurns + 1) % 4;
     item.editVersion += 1;
     const generation = ++state.reprocessGeneration;
@@ -2794,9 +3065,12 @@
   const BaiduPanIntegration = {
     isLoggedIn: false,
     currentPath: '/',
-    selectedFiles: new Set(),
-    currentDirectoryFileIds: new Set(),
+    selectedEntries: new Map(),
+    currentDirectoryEntries: new Map(),
     browserModal: null,
+    directoryRequestId: 0,
+    directoryAbortController: null,
+    previewAbortController: null,
 
     /** 检查登录状态 */
     async checkAuthStatus() {
@@ -2831,28 +3105,39 @@
     },
 
     /** 获取文件列表 */
-    async listFiles(path = '/', page = 1, num = 100) {
+    async listFiles(path = '/', page = 1, num = 100, signal) {
       const res = await fetch(
         `${API_BASE}/files?path=${encodeURIComponent(path)}&page=${page}&num=${num}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to list files');
-      }
+      if (!res.ok) throw new Error(await this.responseError(res, '无法读取文件列表'));
       return res.json();
     },
 
-    /** 下载文件 */
-    async downloadFile(fsId) {
-      const res = await fetch(
-        `${API_BASE}/download?fs_id=${fsId}`,
-        { credentials: 'include' }
-      );
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Failed to download file');
+    async responseError(response, fallback) {
+      try {
+        const data = await response.json();
+        return data.error || fallback;
+      } catch (error) {
+        return `${fallback} (${response.status})`;
       }
+    },
+
+    async fetchThumbnail(url, signal) {
+      const res = await fetch(url, { credentials: 'include', signal });
+      if (!res.ok) throw new Error(await this.responseError(res, '缩略图加载失败'));
+      const blob = await res.blob();
+      if (!/^image\/(jpeg|png|webp)$/.test(blob.type)) throw new Error('缩略图格式无效');
+      return blob;
+    },
+
+    /** 下载文件 */
+    async downloadFile(fsId, signal) {
+      const res = await fetch(
+        `${API_BASE}/download?fs_id=${encodeURIComponent(fsId)}`,
+        { credentials: 'include', signal }
+      );
+      if (!res.ok) throw new Error(await this.responseError(res, '原图下载失败'));
       return res.blob();
     },
 
@@ -2865,7 +3150,8 @@
       }
 
       this.currentPath = '/';
-      this.selectedFiles = new Set();
+      this.selectedEntries = new Map();
+      this.currentDirectoryEntries = new Map();
       this.showBrowserModal();
       await this.loadDirectory('/');
     },
@@ -2894,7 +3180,8 @@
             </div>
           </div>
           <div class="baidu-pan-toolbar">
-            <div class="baidu-pan-path" id="baiduPanPath">/</div>
+            <button type="button" class="text-button baidu-pan-up" aria-label="返回上一级" disabled>←</button>
+            <nav class="baidu-pan-breadcrumb" id="baiduPanPath" aria-label="百度网盘路径"></nav>
             <label class="baidu-pan-select-all">
               <input type="checkbox" id="baiduPanSelectAll" disabled />
               <span>全选</span>
@@ -2926,13 +3213,16 @@
       modal.querySelector('.baidu-pan-refresh').addEventListener('click', () => {
         this.loadDirectory(this.currentPath);
       });
+      modal.querySelector('.baidu-pan-up').addEventListener('click', () => {
+        this.loadDirectory(this.parentPath(this.currentPath));
+      });
       modal.querySelector('#baiduPanSelectAll').addEventListener('change', (event) => {
         const shouldSelect = event.currentTarget.checked;
-        this.currentDirectoryFileIds.forEach(fsId => {
+        this.currentDirectoryEntries.forEach((entry, fsId) => {
           if (shouldSelect) {
-            this.selectedFiles.add(fsId);
+            this.selectedEntries.set(fsId, entry);
           } else {
-            this.selectedFiles.delete(fsId);
+            this.selectedEntries.delete(fsId);
           }
         });
         this.syncRenderedSelection();
@@ -2951,28 +3241,76 @@
       });
     },
 
+    normalizePath(path) {
+      const parts = String(path || '/').split('/').filter(Boolean);
+      return parts.length ? `/${parts.join('/')}` : '/';
+    },
+
+    parentPath(path) {
+      const parts = this.normalizePath(path).split('/').filter(Boolean);
+      parts.pop();
+      return parts.length ? `/${parts.join('/')}` : '/';
+    },
+
+    renderBreadcrumb(path) {
+      const normalized = this.normalizePath(path);
+      const nav = this.browserModal.querySelector('#baiduPanPath');
+      const up = this.browserModal.querySelector('.baidu-pan-up');
+      nav.innerHTML = '';
+      const parts = normalized.split('/').filter(Boolean);
+      const segments = [{ label: '网盘', path: '/' }];
+      let current = '';
+      parts.forEach((part) => {
+        current += `/${part}`;
+        segments.push({ label: part, path: current });
+      });
+      segments.forEach((segment, index) => {
+        if (index > 0) {
+          const separator = document.createElement('span');
+          separator.className = 'baidu-pan-breadcrumb-separator';
+          separator.textContent = '/';
+          nav.appendChild(separator);
+        }
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'baidu-pan-breadcrumb-segment';
+        button.textContent = segment.label;
+        if (segment.path === normalized) {
+          button.disabled = true;
+          button.setAttribute('aria-current', 'page');
+        } else {
+          button.addEventListener('click', () => this.loadDirectory(segment.path));
+        }
+        nav.appendChild(button);
+      });
+      up.disabled = normalized === '/';
+    },
+
     /** 加载目录 */
     async loadDirectory(path) {
+      const normalizedPath = this.normalizePath(path);
+      const requestId = ++this.directoryRequestId;
+      this.directoryAbortController?.abort();
+      const controller = new AbortController();
+      this.directoryAbortController = controller;
       const grid = this.browserModal.querySelector('#baiduPanGrid');
       const loading = this.browserModal.querySelector('.baidu-pan-loading');
       const empty = this.browserModal.querySelector('.baidu-pan-empty');
       const error = this.browserModal.querySelector('.baidu-pan-error');
-      const pathEl = this.browserModal.querySelector('#baiduPanPath');
 
-      grid.innerHTML = '';
       loading.hidden = false;
       empty.hidden = true;
       empty.textContent = '此目录为空';
       error.hidden = true;
-      this.currentDirectoryFileIds = new Set();
-      this.updateSelectedCount();
-
-      this.currentPath = path;
-      pathEl.textContent = path;
 
       try {
-        const data = await this.listFiles(path);
+        const data = await this.listFiles(normalizedPath, 1, 100, controller.signal);
+        if (requestId !== this.directoryRequestId) return;
         loading.hidden = true;
+        grid.innerHTML = '';
+        this.currentPath = this.normalizePath(data.path || normalizedPath);
+        this.renderBreadcrumb(this.currentPath);
+        this.currentDirectoryEntries = new Map();
 
         if (!data.files || data.files.length === 0) {
           empty.hidden = false;
@@ -2980,10 +3318,9 @@
           return;
         }
 
-        // 先显示文件夹，再显示图片
         const dirs = data.files.filter(f => f.is_dir);
         const images = data.files.filter(f => !f.is_dir && f.is_image);
-        this.currentDirectoryFileIds = new Set(images.map(file => String(file.fs_id)));
+        images.forEach((file) => this.currentDirectoryEntries.set(String(file.fs_id), file));
 
         if (dirs.length === 0 && images.length === 0) {
           empty.textContent = '此目录没有可导入的图片';
@@ -2992,22 +3329,14 @@
           return;
         }
 
-        dirs.forEach(dir => {
-          const item = this.createGridItem(dir, true);
-          grid.appendChild(item);
-        });
-        images.forEach(img => {
-          const item = this.createGridItem(img, false);
-          grid.appendChild(item);
-        });
+        dirs.forEach(dir => grid.appendChild(this.createGridItem(dir, true)));
+        images.forEach(img => grid.appendChild(this.createGridItem(img, false)));
         this.updateSelectedCount();
-
       } catch (e) {
+        if (e.name === 'AbortError' || requestId !== this.directoryRequestId) return;
         loading.hidden = true;
         error.hidden = false;
         error.textContent = `加载失败: ${e.message}`;
-        this.currentDirectoryFileIds = new Set();
-        this.updateSelectedCount();
       }
     },
 
@@ -3048,11 +3377,14 @@
       if (file.thumbnail_url) {
         const thumbnail = document.createElement('img');
         thumbnail.className = 'baidu-pan-item-thumbnail';
+        thumbnail.crossOrigin = 'use-credentials';
         thumbnail.src = file.thumbnail_url;
         thumbnail.alt = '';
         thumbnail.loading = 'lazy';
         thumbnail.addEventListener('error', () => {
           thumbnail.remove();
+          fallback.textContent = '缩略图加载失败';
+          fallback.classList.add('baidu-pan-thumbnail-error');
         }, { once: true });
         preview.appendChild(thumbnail);
       }
@@ -3067,22 +3399,22 @@
         event.stopPropagation();
       });
       checkbox.addEventListener('change', () => {
-        this.setFileSelection(fsId, checkbox.checked, item, checkbox);
+        this.setFileSelection(fsId, checkbox.checked, file, item, checkbox);
       });
       item.addEventListener('click', () => {
-        this.setFileSelection(fsId, !this.selectedFiles.has(fsId), item, checkbox);
+        this.setFileSelection(fsId, !this.selectedEntries.has(fsId), file, item, checkbox);
       });
 
-      this.setFileSelection(fsId, this.selectedFiles.has(fsId), item, checkbox, false);
+      this.setFileSelection(fsId, this.selectedEntries.has(fsId), file, item, checkbox, false);
       return item;
     },
 
     /** 设置单个文件的选择状态 */
-    setFileSelection(fsId, selected, item, checkbox, updateCount = true) {
+    setFileSelection(fsId, selected, file, item, checkbox, updateCount = true) {
       if (selected) {
-        this.selectedFiles.add(fsId);
+        this.selectedEntries.set(fsId, file);
       } else {
-        this.selectedFiles.delete(fsId);
+        this.selectedEntries.delete(fsId);
       }
       item.classList.toggle('selected', selected);
       item.setAttribute('aria-selected', String(selected));
@@ -3095,7 +3427,7 @@
       this.browserModal.querySelectorAll('.baidu-pan-item[data-fs-id]').forEach(item => {
         const fsId = item.dataset.fsId;
         const checkbox = item.querySelector('.baidu-pan-item-checkbox');
-        const selected = this.selectedFiles.has(fsId);
+        const selected = this.selectedEntries.has(fsId);
         item.classList.toggle('selected', selected);
         item.setAttribute('aria-selected', String(selected));
         checkbox.checked = selected;
@@ -3104,17 +3436,17 @@
 
     /** 更新已选数量 */
     updateSelectedCount() {
-      const count = this.selectedFiles.size;
+      const count = this.selectedEntries.size;
       const el = this.browserModal.querySelector('.baidu-pan-selected');
       const importBtn = this.browserModal.querySelector('#baiduPanImport');
       const selectAll = this.browserModal.querySelector('#baiduPanSelectAll');
       let selectedInDirectory = 0;
 
-      this.currentDirectoryFileIds.forEach(fsId => {
-        if (this.selectedFiles.has(fsId)) selectedInDirectory += 1;
+      this.currentDirectoryEntries.forEach((entry, fsId) => {
+        if (this.selectedEntries.has(fsId)) selectedInDirectory += 1;
       });
 
-      const directoryCount = this.currentDirectoryFileIds.size;
+      const directoryCount = this.currentDirectoryEntries.size;
       el.textContent = `已选择 ${count} 张照片`;
       importBtn.disabled = count === 0;
       selectAll.disabled = directoryCount === 0;
@@ -3124,45 +3456,68 @@
 
     /** 关闭弹窗 */
     closeBrowser() {
+      this.directoryAbortController?.abort();
+      this.previewAbortController?.abort();
       if (this.browserModal) {
         this.browserModal.hidden = true;
       }
-      this.selectedFiles = new Set();
+      this.selectedEntries = new Map();
+      this.currentDirectoryEntries = new Map();
     },
 
-    /** 导入选中照片 */
+    /** 将选中照片以低清预览导入主画布 */
     async importSelected() {
-      const fsIds = Array.from(this.selectedFiles);
-      if (fsIds.length === 0) return;
+      const entries = Array.from(this.selectedEntries.values());
+      if (entries.length === 0) return;
 
       const importBtn = this.browserModal.querySelector('#baiduPanImport');
       const originalText = importBtn.textContent;
+      const controller = new AbortController();
+      this.previewAbortController?.abort();
+      this.previewAbortController = controller;
       importBtn.disabled = true;
-      importBtn.textContent = `正在下载 ${fsIds.length} 张照片...`;
+      const succeeded = [];
+      const failures = [];
+      let nextIndex = 0;
+      let completed = 0;
+
+      const worker = async () => {
+        while (nextIndex < entries.length && !controller.signal.aborted) {
+          const entry = entries[nextIndex++];
+          try {
+            if (!entry.thumbnail_url) throw new Error('没有可用缩略图');
+            const blob = await this.fetchThumbnail(entry.thumbnail_url, controller.signal);
+            succeeded.push(await readRemotePreview(entry, blob));
+          } catch (error) {
+            if (error.name !== 'AbortError') failures.push({ entry, error });
+          } finally {
+            completed += 1;
+            importBtn.textContent = `正在载入低清预览 ${completed}/${entries.length}`;
+          }
+        }
+      };
 
       try {
-        // 显示通知
-        showNotice(`正在从百度网盘下载 ${fsIds.length} 张照片...`);
-
-        // 下载所有选中文件
-        const blobs = await Promise.all(
-          fsIds.map(fsId => this.downloadFile(fsId))
-        );
-
-        // 转换为 File 对象
-        const files = blobs.map((blob, i) => {
-          const ext = blob.type === 'image/png' ? '.png' : '.jpg';
-          return new File([blob], `baidu_pan_${i + 1}${ext}`, { type: blob.type });
-        });
-
-        // 使用现有的加载函数
+        await Promise.all(Array.from({ length: Math.min(4, entries.length) }, worker));
+        if (controller.signal.aborted) {
+          succeeded.forEach(releaseItem);
+          return;
+        }
+        if (succeeded.length) {
+          state.items.push(...succeeded);
+          render();
+          renderPhotoList();
+          await rebuildAllItemSources(true);
+        }
+        this.previewAbortController = null;
         this.closeBrowser();
-        await loadFiles(files);
-
-      } catch (e) {
-        showNotice(`导入失败: ${e.message}`);
-        console.error('Import error:', e);
+        if (failures.length) {
+          showNotice(`已载入 ${succeeded.length} 张低清预览，${failures.length} 张缩略图失败`);
+        } else {
+          showNotice('已载入低清预览；编辑、拍摄时间排序或导出时将下载原图');
+        }
       } finally {
+        if (this.previewAbortController === controller) this.previewAbortController = null;
         importBtn.disabled = false;
         importBtn.textContent = originalText;
       }
