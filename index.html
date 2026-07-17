@@ -261,7 +261,7 @@
         </div>
 
         <div class="preview-wrap" id="previewWrap">
-          <canvas id="previewCanvas" aria-label="海带索引图 FILM 预览"></canvas>
+          <canvas id="previewCanvas" tabindex="0" aria-label="海带索引图 FILM 预览"></canvas>
           <div class="empty-state" id="emptyState">
             <div class="film-stage" id="filmStage" data-film-state="intro">
               <div class="film-heading">
@@ -311,31 +311,35 @@
     <div class="notice" id="notice" role="status" aria-live="polite"></div>
 
     <!-- 帧操作菜单 -->
-    <div class="frame-menu" id="frameMenu" hidden>
-      <button type="button" data-action="crop">
+    <div class="frame-menu" id="frameMenu" role="menu" hidden>
+      <button type="button" role="menuitem" data-action="crop">
         <span class="menu-icon">✂</span>
         <span>裁切</span>
       </button>
-      <button type="button" data-action="rotate">
+      <button type="button" role="menuitem" data-action="rotate">
         <span class="menu-icon">↻</span>
         <span>旋转 90°</span>
       </button>
-      <button type="button" data-action="insert">
+      <button type="button" role="menuitem" data-action="insert">
         <span class="menu-icon">+</span>
         <span>在此前插入</span>
       </button>
-      <button type="button" data-action="delete">
+      <button type="button" role="menuitem" data-action="export-frame">
+        <span class="menu-icon">⇩</span>
+        <span>导出单帧</span>
+      </button>
+      <button type="button" role="menuitem" data-action="delete">
         <span class="menu-icon">×</span>
         <span>删除</span>
       </button>
     </div>
 
     <!-- 裁切工具弹窗 -->
-    <div class="crop-modal" id="cropModal" hidden>
+    <div class="crop-modal" id="cropModal" role="dialog" aria-modal="true" aria-labelledby="cropModalTitle" hidden>
       <div class="crop-backdrop"></div>
       <div class="crop-container">
         <div class="crop-header">
-          <h3>裁切图片</h3>
+          <h3 id="cropModalTitle">裁切图片</h3>
           <button type="button" class="crop-close" id="cropClose" aria-label="关闭">×</button>
         </div>
         <div class="crop-body">
@@ -358,7 +362,58 @@
       </div>
     </div>
 
+    <!-- 单帧片基导出弹窗 -->
+    <div class="frame-export-modal" id="frameExportModal" role="dialog" aria-modal="true" aria-labelledby="frameExportTitle" hidden>
+      <div class="frame-export-backdrop"></div>
+      <div class="frame-export-container" tabindex="-1">
+        <div class="frame-export-header">
+          <div>
+            <h3 id="frameExportTitle">导出单帧</h3>
+            <p id="frameExportMeta"></p>
+          </div>
+          <button type="button" class="frame-export-close" id="frameExportClose" aria-label="关闭">×</button>
+        </div>
+        <div class="frame-export-body">
+          <div class="frame-export-preview-wrap">
+            <canvas id="frameExportCanvas"></canvas>
+          </div>
+          <div class="frame-export-controls">
+            <label class="field">
+              <span>输出质量</span>
+              <select id="frameExportScale">
+                <option value="1">标准 1x</option>
+                <option value="2" selected>精细 2x</option>
+                <option value="3">超精细 3x</option>
+                <option value="full">原图级</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>格式</span>
+              <select id="frameExportFormat">
+                <option value="image/png">PNG</option>
+                <option value="image/jpeg">JPG</option>
+              </select>
+            </label>
+            <label class="field frame-export-quality" id="frameExportQualityField" hidden>
+              <span>JPG 质量 <output id="frameExportQualityValue">92%</output></span>
+              <input id="frameExportQuality" type="range" min="70" max="100" value="92" />
+            </label>
+          </div>
+          <div class="frame-export-info">
+            <strong id="frameExportSize">—</strong>
+            <p id="frameExportStatus" role="status" aria-live="polite">预览已生成</p>
+          </div>
+        </div>
+        <div class="frame-export-footer">
+          <button type="button" class="text-button" id="frameExportCancel">取消</button>
+          <button type="button" class="primary-button" id="frameExportApply">导出单帧</button>
+        </div>
+      </div>
+    </div>
+
     <script src="baidu-pan-config.js"></script>
+    <script src="film-frame-135.js"></script>
+    <script src="film-frame.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>片基单帧样式 Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="frame-demo" id="frameDemo">
+      <header class="demo-hero">
+        <div>
+          <p class="eyebrow">Single Film Frame Study</p>
+          <h1>片基单帧样式</h1>
+          <p class="hero-copy">用同一张照片检查 135、半格、宽幅与 120 单帧的物理比例、片基边带、齿孔和边字。当前页面仅用于视觉评审，不包含导出功能。</p>
+        </div>
+        <div class="hero-badge" aria-label="离线本地预览">
+          <span></span>
+          本地离线预览
+        </div>
+      </header>
+
+      <section class="control-panel" aria-labelledby="controlsTitle">
+        <div class="control-heading">
+          <div>
+            <p class="section-kicker">Film Frame Lab</p>
+            <h2 id="controlsTitle">画幅与预览</h2>
+          </div>
+          <p>切换画幅后，片基会按对应物理规格重新绘制。</p>
+        </div>
+
+        <div class="source-controls">
+          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" />
+          <label class="upload-button" for="imageInput">
+            <span aria-hidden="true">＋</span>
+            选择本地照片
+          </label>
+          <button class="secondary-button" id="restoreSample" type="button">恢复内置样片</button>
+          <button class="secondary-button" id="resetAll" type="button">重置预览</button>
+          <p class="source-note">也可以把 JPG、PNG 或 WebP 拖到页面中。图片不会上传。</p>
+        </div>
+
+        <div class="control-grid">
+          <label class="range-control">
+            <span><b>预览尺寸</b><output id="previewScaleValue">100%</output></span>
+            <input id="previewScale" type="range" min="76" max="116" value="100" />
+          </label>
+          <label class="select-control">
+            <span><b>底片画幅</b></span>
+            <select id="filmFormat">
+              <option value="135">135 全画幅 · 36×24</option>
+              <option value="half-cropped">135 半格 · 单张裁切</option>
+              <option value="half-uncropped">135 半格 · 完整扫描</option>
+              <option value="xpan">XPan · 65×24</option>
+              <option value="135-69">135 超宽幅 · 84×24</option>
+              <option value="645">120 · 645</option>
+              <option value="66">120 · 6×6</option>
+              <option value="67">120 · 6×7</option>
+              <option value="69">120 · 6×9</option>
+              <option value="612">120 · 6×12</option>
+              <option value="617">120 · 6×17</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="comparison-section" aria-labelledby="comparisonTitle">
+        <div class="comparison-heading">
+          <div>
+            <p class="section-kicker">Film Preview</p>
+            <h2 id="comparisonTitle">单帧片基预览</h2>
+          </div>
+          <p class="format-note">共享主应用的片基、曝光窗、齿孔与边字绘制方法。</p>
+        </div>
+
+        <div class="style-grid" id="styleGrid">
+          <figure class="style-card" data-style="filmFrame135">
+            <div class="canvas-stage" tabindex="0" role="img" aria-labelledby="filmTitle filmDesc" data-style-stage="filmFrame135">
+              <canvas data-style-canvas="filmFrame135"></canvas>
+              <span class="drag-hint">拖动调整姿态</span>
+            </div>
+            <figcaption>
+              <div class="card-title-row">
+                <div>
+                  <span class="material-tag film">片基</span>
+                  <h3 id="filmTitle">135 全画幅 单帧</h3>
+                </div>
+                <span class="ratio-mark" id="filmRatio">36 × 24</span>
+              </div>
+              <p id="filmDesc">保留棕黑片基、上下齿孔、橙色边字与中央 3:2 曝光窗。</p>
+              <div class="card-actions">
+                <button type="button" data-action="structure" aria-pressed="false">显示结构层</button>
+                <button type="button" data-action="reset">重置姿态</button>
+              </div>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <aside class="detail-note">
+        <div class="detail-rule"></div>
+        <div>
+          <p class="section-kicker">Review Notes</p>
+          <h2>评审重点</h2>
+        </div>
+        <ol>
+          <li>曝光窗比例是否符合所选画幅的真实物理尺寸。</li>
+          <li>135 的齿孔、边字与侧边距，以及 120 的平切端头是否自然。</li>
+          <li>结构层是否准确贴合片基外轮廓和中央曝光区域。</li>
+        </ol>
+      </aside>
+
+      <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+        <div><span>↓</span><strong>松开以预览照片</strong><small>仅在浏览器本地读取</small></div>
+      </div>
+      <p class="sr-status" id="status" role="status" aria-live="polite">已载入内置样片。</p>
+    </main>
+
+    <script src="../../../film-frame-135.js"></script>
+    <script src="../../../film-frame.js"></script>
+    <script src="./style-renderer.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

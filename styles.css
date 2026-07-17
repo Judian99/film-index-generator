@@ -354,7 +354,8 @@ select {
 
 /* 帧操作菜单 */
 .frame-menu[hidden],
-.crop-modal[hidden] {
+.crop-modal[hidden],
+.frame-export-modal[hidden] {
   display: none;
 }
 
@@ -550,6 +551,180 @@ select {
 
 .crop-footer .primary-button {
   min-width: 120px;
+}
+
+/* 单帧片基导出弹窗 */
+.frame-export-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.frame-export-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(23, 25, 28, 0.75);
+  backdrop-filter: blur(4px);
+}
+
+.frame-export-container {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(880px, calc(100vw - 40px));
+  max-height: calc(100vh - 60px);
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.32);
+}
+
+.frame-export-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.frame-export-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.frame-export-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.frame-export-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.frame-export-close:hover {
+  color: var(--ink);
+  background: rgba(23, 25, 28, 0.08);
+}
+
+.frame-export-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(220px, 0.7fr);
+  gap: 20px;
+  overflow: auto;
+  padding: 22px;
+}
+
+.frame-export-preview-wrap {
+  display: grid;
+  min-height: 360px;
+  place-items: center;
+  overflow: auto;
+  border: 1px solid rgba(23, 25, 28, 0.1);
+  border-radius: 10px;
+  background-color: #ddd7cb;
+  background-image:
+    linear-gradient(45deg, rgba(255,255,255,.32) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,.32) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,.32) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.32) 75%);
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-size: 20px 20px;
+}
+
+#frameExportCanvas {
+  display: block;
+  max-width: 100%;
+  max-height: 460px;
+}
+
+.frame-export-controls {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.frame-export-controls .field {
+  padding: 0;
+}
+
+.frame-export-quality output {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-export-info {
+  grid-column: 2;
+  align-self: end;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(23, 25, 28, 0.05);
+}
+
+.frame-export-info strong {
+  display: block;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-export-info p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.frame-export-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 22px;
+  border-top: 1px solid var(--line);
+}
+
+.frame-export-footer .text-button {
+  min-width: 80px;
+}
+
+.frame-export-footer .primary-button {
+  min-width: 120px;
+}
+
+@media (max-width: 720px) {
+  .frame-export-container {
+    width: min(100vw - 20px, 880px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .frame-export-body {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .frame-export-preview-wrap {
+    min-height: 260px;
+  }
+
+  .frame-export-info {
+    grid-column: 1;
+  }
 }
 
 .segmented label {
