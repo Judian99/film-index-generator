@@ -103,6 +103,7 @@
     manualHalfColumns: Math.max(4, Number(columnsSelect.value) || 6),
     sortMode: document.querySelector("input[name='sortMode']:checked").value,
     exportHydrationItems: null,
+    exportCancelled: false,
     sourceCommitPromise: Promise.resolve(),
     isExporting: false,
   };
@@ -157,6 +158,7 @@
     { id: "kodak-px-125", name: "Kodak P3200", edgeText: "KODAK P3200", process: "BW" },
 
     // Fujifilm 彩色负片
+    { id: "fujifilm-100", name: "Fujifilm 100", edgeText: "FUJIFILM 100", process: "C-41" },
     { id: "fujifilm-400", name: "Fujifilm 400", edgeText: "FUJIFILM 400", process: "C-41" },
     { id: "fujifilm-c400", name: "Fujifilm C400", edgeText: "FUJIFILM C400", process: "C-41" },
     { id: "fujicolor-c200", name: "Fujicolor C200", edgeText: "FUJICOLOR C200", process: "C-41" },
@@ -262,6 +264,8 @@
   // 浏览器 canvas 尺寸安全上限（保守取值，超出后 toBlob 会得到 null）
   const MAX_CANVAS_SIDE = 16384;
   const MAX_CANVAS_AREA = 16384 * 16384;
+  const EXPORT_TILE_SIDE = 8192;
+  const PNG_MAX_DIMENSION = 0x7fffffff;
 
   const filmStageStates = {
     intro: {
@@ -413,9 +417,15 @@
     control.addEventListener("change", handleFrameModeChange);
   });
 
-  formatSelect.addEventListener("change", () => {
-    qualityField.style.display = formatSelect.value === "image/jpeg" ? "grid" : "none";
-  });
+  function updateExportFormatControls() {
+    const fullResolution = exportScale.value === "full";
+    if (fullResolution) formatSelect.value = "image/png";
+    formatSelect.disabled = fullResolution;
+    qualityField.style.display = !fullResolution && formatSelect.value === "image/jpeg" ? "grid" : "none";
+  }
+
+  exportScale.addEventListener("change", updateExportFormatControls);
+  formatSelect.addEventListener("change", updateExportFormatControls);
 
   zoomRange.addEventListener("input", () => {
     setPreviewZoom(Number(zoomRange.value) / 100);
@@ -434,13 +444,24 @@
   exportButton.addEventListener("click", async () => {
     if (!state.items.length) return;
     if (state.isExporting) {
-      cancelOriginalDownloads(state.exportHydrationItems || state.items);
+      if (state.exportHydrationItems) {
+        state.exportCancelled = true;
+        cancelOriginalDownloads(state.exportHydrationItems);
+      } else {
+        state.exportCancelled = true;
+        exportButton.disabled = true;
+        exportButton.textContent = "正在取消...";
+      }
       return;
     }
     await exportIndexImage();
   });
 
   clearButton.addEventListener("click", () => {
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再清空照片");
+      return;
+    }
     state.reprocessGeneration += 1;
     state.items.forEach(releaseItem);
     state.items = [];
@@ -772,7 +793,7 @@
     return contentStartX + slot * (options.slotW + options.slotGap);
   }
 
-  qualityField.style.display = "none";
+  updateExportFormatControls();
   updateFrameModeControls();
   drawEmptyCanvas();
   applyPreviewZoom();
@@ -983,7 +1004,7 @@
     let nextIndex = 0;
     let completed = 0;
     const worker = async () => {
-      while (nextIndex < pending.length) {
+      while (nextIndex < pending.length && !state.exportCancelled) {
         const item = pending[nextIndex++];
         try {
           await ensureOriginal(item, reason);
@@ -1234,76 +1255,366 @@
     imageCounter.textContent = `${items.length} 张`;
     emptyState.classList.add("is-hidden");
     previewWrap.classList.remove("is-empty", "is-loading");
-    exportButton.disabled = false;
+    exportButton.disabled = state.isExporting && !state.exportHydrationItems;
     applyPreviewZoom();
+  }
+
+  function getFullResolutionScale(items) {
+    const baseOptions = getRenderOptions(1);
+    let scale = items.reduce((requiredScale, item) => {
+      if (!Number.isFinite(item.width) || !Number.isFinite(item.height) || item.width <= 0 || item.height <= 0) {
+        return requiredScale;
+      }
+      return Math.max(
+        requiredScale,
+        Math.min(item.width / baseOptions.slotW, item.height / baseOptions.slotH),
+      );
+    }, 1);
+
+    // 部分画幅尺寸会取整；按 drawFrame 的 cover 规则复核，避免取整后仍缩小有效源像素。
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const options = getRenderOptions(scale);
+      const correction = items.reduce((requiredCorrection, item) => {
+        if (!Number.isFinite(item.width) || !Number.isFinite(item.height) || item.width <= 0 || item.height <= 0) {
+          return requiredCorrection;
+        }
+        const coverScale = Math.max(options.slotW / item.width, options.slotH / item.height);
+        return coverScale < 1 ? Math.max(requiredCorrection, 1 / coverScale) : requiredCorrection;
+      }, 1);
+      if (correction <= 1) break;
+      scale *= correction * (1 + Number.EPSILON * 8);
+    }
+
+    return scale;
+  }
+
+  function makeCrc32Table() {
+    return Array.from({ length: 256 }, (_, index) => {
+      let value = index;
+      for (let bit = 0; bit < 8; bit += 1) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      return value >>> 0;
+    });
+  }
+
+  const CRC32_TABLE = makeCrc32Table();
+  const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const PNG_BAND_BYTES = 24 * 1024 * 1024;
+  const MAX_STREAMED_PNG_BYTES = 1536 * 1024 * 1024;
+
+  function updateCrc32(crc, bytes) {
+    let value = crc;
+    for (let index = 0; index < bytes.length; index += 1) {
+      value = CRC32_TABLE[(value ^ bytes[index]) & 0xff] ^ (value >>> 8);
+    }
+    return value;
+  }
+
+  function createPngChunk(type, data = new Uint8Array()) {
+    const typeBytes = new TextEncoder().encode(type);
+    const buffer = new ArrayBuffer(12 + data.length);
+    const view = new DataView(buffer);
+    view.setUint32(0, data.length, false);
+    const bytes = new Uint8Array(buffer);
+    bytes.set(typeBytes, 4);
+    bytes.set(data, 8);
+    let crc = updateCrc32(0xffffffff, typeBytes);
+    crc = updateCrc32(crc, data);
+    view.setUint32(8 + data.length, (crc ^ 0xffffffff) >>> 0, false);
+    return buffer;
+  }
+
+  function createPngHeader(width, height) {
+    const data = new Uint8Array(13);
+    const view = new DataView(data.buffer);
+    view.setUint32(0, width, false);
+    view.setUint32(4, height, false);
+    data[8] = 8;
+    data[9] = 2;
+    data[10] = 0;
+    data[11] = 0;
+    data[12] = 0;
+    return createPngChunk("IHDR", data);
+  }
+
+  function getPngBandHeight(width, remainingHeight) {
+    const rowBytes = width * 3 + 1;
+    return Math.max(1, Math.min(remainingHeight, Math.floor(PNG_BAND_BYTES / rowBytes)));
+  }
+
+  function copyTileToScanlines(imageData, scanlines, fullWidth, tileX, tileWidth, bandHeight) {
+    const source = imageData.data;
+    const rowStride = fullWidth * 3 + 1;
+    for (let y = 0; y < bandHeight; y += 1) {
+      let sourceOffset = y * tileWidth * 4;
+      let targetOffset = y * rowStride + 1 + tileX * 3;
+      for (let x = 0; x < tileWidth; x += 1) {
+        scanlines[targetOffset] = source[sourceOffset];
+        scanlines[targetOffset + 1] = source[sourceOffset + 1];
+        scanlines[targetOffset + 2] = source[sourceOffset + 2];
+        sourceOffset += 4;
+        targetOffset += 3;
+      }
+    }
+  }
+
+  function applyPngSubFilter(scanlines, width, height) {
+    const rowStride = width * 3 + 1;
+    const pixelBytes = width * 3;
+    for (let y = 0; y < height; y += 1) {
+      const rowStart = y * rowStride;
+      scanlines[rowStart] = 1;
+      for (let offset = pixelBytes; offset > 3; offset -= 1) {
+        const index = rowStart + offset;
+        scanlines[index] = (scanlines[index] - scanlines[index - 3]) & 0xff;
+      }
+    }
+  }
+
+  async function renderPngBand(items, options, layout, bandY, bandHeight) {
+    const rowBytes = layout.canvasW * 3 + 1;
+    const scanlines = new Uint8Array(rowBytes * bandHeight);
+    const previousCanvas = activeCanvas;
+    const previousCtx = ctx;
+    for (let x = 0; x < layout.canvasW; x += EXPORT_TILE_SIDE) {
+      if (state.exportCancelled) throw new DOMException("Export cancelled", "AbortError");
+      const tileWidth = Math.min(EXPORT_TILE_SIDE, layout.canvasW - x);
+      const canvas = document.createElement("canvas");
+      const tileCtx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!tileCtx) throw new Error("Canvas 2D context unavailable");
+      activeCanvas = canvas;
+      ctx = tileCtx;
+      try {
+        drawLayout(items, options, layout, { x, y: bandY, width: tileWidth, height: bandHeight });
+        const pixels = tileCtx.getImageData(0, 0, tileWidth, bandHeight);
+        copyTileToScanlines(pixels, scanlines, layout.canvasW, x, tileWidth, bandHeight);
+      } finally {
+        activeCanvas = previousCanvas;
+        ctx = previousCtx;
+        canvas.width = 1;
+        canvas.height = 1;
+      }
+    }
+    applyPngSubFilter(scanlines, layout.canvasW, bandHeight);
+    return scanlines;
+  }
+
+  async function exportStreamedPng(items, options, layout, sizeLabel) {
+    if (typeof CompressionStream !== "function") {
+      throw new Error("PNG_STREAM_UNSUPPORTED");
+    }
+    if (
+      layout.canvasW > PNG_MAX_DIMENSION ||
+      layout.canvasH > PNG_MAX_DIMENSION ||
+      !Number.isSafeInteger(layout.canvasW * layout.canvasH)
+    ) {
+      throw new Error("PNG_DIMENSIONS_TOO_LARGE");
+    }
+
+    const compression = new CompressionStream("deflate");
+    const writer = compression.writable.getWriter();
+    const reader = compression.readable.getReader();
+    const pngParts = [PNG_SIGNATURE, createPngHeader(layout.canvasW, layout.canvasH)];
+    let pngBytes = PNG_SIGNATURE.byteLength + 25;
+    const consumeCompressed = (async () => {
+      while (true) {
+        if (state.exportCancelled) throw new DOMException("Export cancelled", "AbortError");
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = createPngChunk("IDAT", value);
+        pngParts.push(chunk);
+        pngBytes += chunk.byteLength;
+        if (pngBytes > MAX_STREAMED_PNG_BYTES) throw new Error("PNG_FILE_TOO_LARGE");
+      }
+    })();
+
+    exportButton.disabled = false;
+    try {
+      for (let y = 0; y < layout.canvasH;) {
+        if (state.exportCancelled) throw new DOMException("Export cancelled", "AbortError");
+        const bandHeight = getPngBandHeight(layout.canvasW, layout.canvasH - y);
+        const percent = Math.floor((y / layout.canvasH) * 100);
+        exportButton.textContent = `取消导出（${percent}%）`;
+        statusTitle.textContent = `正在拼接原图级 PNG ${percent}%`;
+        const scanlines = await renderPngBand(items, options, layout, y, bandHeight);
+        await writer.write(scanlines);
+        y += bandHeight;
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
+      await writer.close();
+      await consumeCompressed;
+      if (state.exportCancelled) throw new DOMException("Export cancelled", "AbortError");
+      pngParts.push(createPngChunk("IEND"));
+      const blob = new Blob(pngParts, { type: "image/png" });
+      if (blob.size > MAX_STREAMED_PNG_BYTES) throw new Error("PNG_FILE_TOO_LARGE");
+      downloadBlob(blob, `film-index-${new Date().toISOString().slice(0, 10)}-full-resolution.png`);
+      showNotice(`原图级索引图已拼接为一张 ${sizeLabel} 像素的 PNG`);
+    } catch (error) {
+      try {
+        await writer.abort(error);
+      } catch {}
+      try {
+        await reader.cancel(error);
+      } catch {}
+      throw error;
+    }
+  }
+
+  function canvasToBlob(canvas, mimeType, quality) {
+    return new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("CANVAS_ENCODING_FAILED"));
+        }, mimeType, quality);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function downloadBlob(blob, filename) {
+    const link = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+
+  function getExportFailureMessage(stage, isFullResolution, sizeLabel) {
+    if (!isFullResolution) {
+      return stage === "draw"
+        ? "导出失败：浏览器无法创建该尺寸画布，请降低输出质量或尺寸基准后重试"
+        : "导出失败：浏览器无法编码该尺寸画布，请降低输出质量或尺寸基准";
+    }
+    return stage === "draw"
+      ? `原图级导出失败：浏览器无法创建 ${sizeLabel} 像素的画布。请改用 3x、降低尺寸基准或减少照片数量后重试`
+      : `原图级导出失败：浏览器无法编码 ${sizeLabel} 像素的画布。请改用 3x 或降低尺寸基准`;
+  }
+
+  function setSourceEditingLocked(locked) {
+    frameAspect.disabled = locked;
+    wideSpecSelect.disabled = locked || frameAspect.value !== "xpan";
+    halfFrameModeInputs.forEach((control) => {
+      control.disabled = locked || frameAspect.value !== "half";
+    });
   }
 
   async function exportIndexImage() {
     const originalButtonText = exportButton.textContent;
+    const originalButtonDisabled = exportButton.disabled;
     state.isExporting = true;
+    state.exportCancelled = false;
+    setSourceEditingLocked(true);
     state.exportHydrationItems = [...state.items];
     exportButton.textContent = "取消原图下载";
-    const failures = await ensureAllOriginals(state.exportHydrationItems, "导出准备");
-    state.isExporting = false;
-    state.exportHydrationItems = null;
-    exportButton.textContent = originalButtonText;
-    if (failures.length) {
-      const names = failures.slice(0, 3).map(({ item }) => item.name).join("、");
-      showNotice(`导出已取消：${failures.length} 张原图获取失败${names ? `（${names}）` : ""}`);
+
+    try {
+      const failures = await ensureAllOriginals(state.exportHydrationItems, "导出准备");
+      state.exportHydrationItems = null;
+      if (failures.length) {
+        const names = failures.slice(0, 3).map(({ item }) => item.name).join("、");
+        showNotice(`导出已取消：${failures.length} 张原图获取失败${names ? `（${names}）` : ""}`);
+        render();
+        return;
+      }
+      if (state.items.some((item) => item.remote && item.remote.quality !== "full")) {
+        showNotice("导出已取消：仍有照片未获取原图");
+        render();
+        return;
+      }
+
       render();
-      return;
-    }
-    if (state.items.some((item) => item.remote && item.remote.quality !== "full")) {
-      showNotice("导出已取消：仍有照片未获取原图");
-      render();
-      return;
-    }
+      exportButton.textContent = "正在导出...";
+      exportButton.disabled = true;
+      const isFullResolution = exportScale.value === "full";
+      const scale = isFullResolution
+        ? getFullResolutionScale(state.items)
+        : clamp(Number(exportScale.value) || 1, 1, 3);
+      if (!Number.isFinite(scale) || scale <= 0) {
+        showNotice("导出失败：无法计算有效的输出尺寸");
+        return;
+      }
 
-    render();
-    const scale = clamp(Number(exportScale.value) || 1, 1, 3);
-    const options = getRenderOptions(scale);
-    const layout = computeLayout(state.items.length, options);
+      const options = getRenderOptions(scale);
+      const layout = computeLayout(state.items.length, options);
+      const sizeLabel = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()}`;
 
-    if (
-      layout.canvasW > MAX_CANVAS_SIDE ||
-      layout.canvasH > MAX_CANVAS_SIDE ||
-      layout.canvasW * layout.canvasH > MAX_CANVAS_AREA
-    ) {
-      showNotice("导出尺寸超出浏览器画布上限，请降低输出质量或尺寸基准后重试");
-      return;
-    }
+      const exceedsCanvasLimit =
+        !Number.isFinite(layout.canvasW) ||
+        !Number.isFinite(layout.canvasH) ||
+        layout.canvasW <= 0 ||
+        layout.canvasH <= 0 ||
+        layout.canvasW > MAX_CANVAS_SIDE ||
+        layout.canvasH > MAX_CANVAS_SIDE ||
+        layout.canvasW * layout.canvasH > MAX_CANVAS_AREA;
+      const items = getSortedItems();
+      const mimeType = isFullResolution ? "image/png" : formatSelect.value;
+      const quality = Number(jpgQuality.value) / 100;
+      const extension = mimeType === "image/jpeg" ? "jpg" : "png";
 
-    const previousCanvas = activeCanvas;
-    const previousCtx = ctx;
-    const mimeType = formatSelect.value;
-    const quality = Number(jpgQuality.value) / 100;
-    const extension = mimeType === "image/jpeg" ? "jpg" : "png";
-    const outputCanvas = document.createElement("canvas");
-
-    activeCanvas = outputCanvas;
-    ctx = outputCanvas.getContext("2d");
-    drawIndex(getSortedItems(), options);
-
-    activeCanvas = previousCanvas;
-    ctx = previousCtx;
-
-    outputCanvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          showNotice("导出失败：画布尺寸过大，请降低输出质量或尺寸基准");
+      if (exceedsCanvasLimit) {
+        if (!isFullResolution) {
+          showNotice(`导出尺寸为 ${sizeLabel} 像素，超过浏览器画布上限，请降低输出质量或尺寸基准后重试`);
           return;
         }
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `film-index-${new Date().toISOString().slice(0, 10)}.${extension}`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(link.href);
-      },
-      mimeType,
-      quality,
-    );
+        await exportStreamedPng(items, options, layout, sizeLabel);
+        return;
+      }
+
+      const previousCanvas = activeCanvas;
+      const previousCtx = ctx;
+      let outputCanvas;
+
+      try {
+        outputCanvas = document.createElement("canvas");
+        const outputCtx = outputCanvas.getContext("2d");
+        if (!outputCtx) throw new Error("Canvas 2D context unavailable");
+        activeCanvas = outputCanvas;
+        ctx = outputCtx;
+        drawLayout(items, options, layout);
+      } catch (error) {
+        console.error("导出画布绘制失败", error);
+        showNotice(getExportFailureMessage("draw", isFullResolution, sizeLabel));
+        return;
+      } finally {
+        activeCanvas = previousCanvas;
+        ctx = previousCtx;
+      }
+
+      try {
+        const blob = await canvasToBlob(outputCanvas, mimeType, quality);
+        downloadBlob(blob, `film-index-${new Date().toISOString().slice(0, 10)}.${extension}`);
+      } catch (error) {
+        console.error("导出画布编码失败", error);
+        showNotice(getExportFailureMessage("encode", isFullResolution, sizeLabel));
+      }
+    } catch (error) {
+      if (error.name === "AbortError") {
+        showNotice("原图级 PNG 导出已取消");
+      } else if (error.message === "PNG_STREAM_UNSUPPORTED") {
+        showNotice("当前浏览器不支持超大 PNG 流式编码，请改用最新版 Chrome、Edge 或 Firefox，或改用 3x 导出");
+      } else if (error.message === "PNG_DIMENSIONS_TOO_LARGE" || error.message === "PNG_FILE_TOO_LARGE") {
+        showNotice("原图级 PNG 尺寸或体积过大，请降低尺寸基准、减少照片或改用 3x 导出");
+      } else {
+        console.error("导出失败", error);
+        showNotice("原图级 PNG 拼接失败，请降低尺寸基准、减少照片或改用 3x 后重试");
+      }
+    } finally {
+      state.isExporting = false;
+      state.exportCancelled = false;
+      state.exportHydrationItems = null;
+      setSourceEditingLocked(false);
+      updateFrameModeControls();
+      updateExportFormatControls();
+      exportButton.textContent = originalButtonText;
+      exportButton.disabled = originalButtonDisabled;
+      render();
+    }
   }
 
   function getRenderOptions(scale) {
@@ -1472,38 +1783,52 @@
     return options.sheetPad + baseOffset + (rowIndex === 0 ? firstRowOffset : 0);
   }
 
-  function drawIndex(items, options) {
-    const layout = computeLayout(items.length, options);
+  function drawLayout(items, options, layout, tile = null) {
     const isPreview = activeCanvas === previewCanvas;
+    const bounds = tile || { x: 0, y: 0, width: layout.canvasW, height: layout.canvasH };
 
-    activeCanvas.width = layout.canvasW;
-    activeCanvas.height = layout.canvasH;
-    ctx.clearRect(0, 0, layout.canvasW, layout.canvasH);
-    drawSheetBackground(layout.canvasW, layout.canvasH);
+    activeCanvas.width = bounds.width;
+    activeCanvas.height = bounds.height;
+    ctx.clearRect(0, 0, bounds.width, bounds.height);
+    ctx.save();
+    ctx.translate(-bounds.x, -bounds.y);
+    drawSheetBackground(layout.canvasW, layout.canvasH, bounds);
 
     if (isPreview) state.frameRects = [];
 
     layout.rows.forEach((rowInfo, row) => {
+      const y = options.sheetPad + row * (layout.stripH + options.rowGap);
+      const shadowPad = options.frameW * 0.08;
+      if (y + layout.stripH + shadowPad < bounds.y || y - shadowPad > bounds.y + bounds.height) return;
       const rowItems = items.slice(rowInfo.start, rowInfo.start + rowInfo.count);
       const x = getRowX(layout, row, options);
-      const y = options.sheetPad + row * (layout.stripH + options.rowGap);
       drawFilmRow(rowItems, rowInfo, x, y, layout, row, options, isPreview);
     });
 
     if (isPreview && state.dropIndex !== null) {
       drawDropIndicator(layout, options);
     }
+    ctx.restore();
   }
 
-  function drawSheetBackground(width, height) {
+  function drawIndex(items, options) {
+    const layout = computeLayout(items.length, options);
+    drawLayout(items, options, layout);
+  }
+
+  function drawSheetBackground(width, height, bounds = { x: 0, y: 0, width, height }) {
     ctx.fillStyle = "#f7f1e6";
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
     ctx.fillStyle = "rgba(45, 40, 32, 0.035)";
-    for (let y = 0; y < height; y += 18) {
-      ctx.fillRect(0, y, width, 1);
+    const firstStripe = Math.ceil(bounds.y / 18) * 18;
+    for (let y = firstStripe; y < bounds.y + bounds.height; y += 18) {
+      ctx.fillRect(bounds.x, y, bounds.width, 1);
     }
-    ctx.fillStyle = "rgba(255,255,255,0.42)";
-    ctx.fillRect(0, 0, width, Math.max(80, height * 0.08));
+    const highlightH = Math.max(80, height * 0.08);
+    if (bounds.y < highlightH) {
+      ctx.fillStyle = "rgba(255,255,255,0.42)";
+      ctx.fillRect(bounds.x, bounds.y, bounds.width, Math.min(bounds.height, highlightH - bounds.y));
+    }
   }
 
   function drawFilmRow(items, rowInfo, x, y, layout, rowIndex, options, isPreview) {
@@ -2107,6 +2432,10 @@
   }
 
   function removeItem(id) {
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再移除照片");
+      return;
+    }
     const index = state.items.findIndex((item) => item.id === id);
     if (index < 0) return;
     state.reprocessGeneration += 1;
@@ -2253,6 +2582,10 @@
   // ---- 裁切工具：交互式裁切框 ----
 
   async function openCropModal(itemId) {
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再裁切照片");
+      return;
+    }
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
     try {
@@ -2485,6 +2818,10 @@
 
   // 恢复原图：丢弃所有裁切，回到导入时的原始状态
   cropRestoreOriginal.addEventListener("click", async () => {
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再恢复照片");
+      return;
+    }
     if (!state.cropState) return;
     const { itemId, editVersion } = state.cropState;
     const item = state.items.find((entry) => entry.id === itemId);
@@ -2544,6 +2881,10 @@
   });
 
   cropApply.addEventListener("click", async () => {
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再应用裁切");
+      return;
+    }
     if (!state.cropState) return;
     const { itemId, displayW, displayH, cropX, cropY, cropW, cropH, editVersion } = state.cropState;
     const item = state.items.find((entry) => entry.id === itemId);
@@ -2599,6 +2940,10 @@
   // ---- 旋转图片：顺时针 90 度 ----
 
   async function rotateItem(itemId) {
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再旋转照片");
+      return;
+    }
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
     try {
@@ -2624,6 +2969,10 @@
   }
 
   async function loadFiles(files, insertBeforeId = null) {
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再导入照片");
+      return;
+    }
     if (!files.length) {
       if (!state.items.length) setFilmStageState("intro");
       return;
@@ -2754,6 +3103,9 @@
 
   function loadStoredStocks() {
     state.nextStockSeq = 1;
+    const selected = localStorage.getItem(STORAGE_SELECTED_KEY);
+    const remappedIds = new Map();
+    let stocksChanged = false;
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_STOCKS_KEY) || "[]");
       if (Array.isArray(parsed)) {
@@ -2761,7 +3113,12 @@
         parsed.forEach((raw) => {
           const stock = sanitizeStock(raw);
           if (!stock) return;
-          if (seen.has(stock.id)) stock.id = makeStockId(stock.name);
+          if (seen.has(stock.id)) {
+            const previousId = stock.id;
+            stock.id = makeStockId(stock.name);
+            if (!remappedIds.has(previousId)) remappedIds.set(previousId, stock.id);
+            stocksChanged = true;
+          }
           seen.add(stock.id);
           state.customStocks.push(stock);
         });
@@ -2777,15 +3134,19 @@
     const mergedStocks = state.customStocks.filter((s) => !builtinIds.has(s.id));
     if (mergedStocks.length !== state.customStocks.length) {
       state.customStocks = mergedStocks;
+      stocksChanged = true;
+    }
+
+    const migratedSelected = remappedIds.get(selected) || selected;
+    state.stockId = findStock(migratedSelected) ? migratedSelected : DEFAULT_STOCK_ID;
+    if (stocksChanged || migratedSelected !== selected) {
       try {
         localStorage.setItem(STORAGE_STOCKS_KEY, JSON.stringify(state.customStocks));
+        localStorage.setItem(STORAGE_SELECTED_KEY, state.stockId);
       } catch (error) {
         // 忽略存储错误
       }
     }
-
-    const selected = localStorage.getItem(STORAGE_SELECTED_KEY);
-    state.stockId = findStock(selected) ? selected : DEFAULT_STOCK_ID;
   }
 
   function persistStocks() {
