@@ -159,11 +159,7 @@ export async function getDownloadUrl(accessToken, fsId) {
     throw new Error('No download link found');
   }
 
-  return {
-    dlink: data.list[0].dlink,
-    size: Number(data.list[0].size),
-    filename: data.list[0].server_filename || data.list[0].filename || ''
-  };
+  return data.list[0].dlink;
 }
 
 /**

@@ -1,10 +1,10 @@
 /**
  * 百度网盘配置
- * EdgeOne 部署完成后，将下方地址替换为固定的 production 默认域名。
+ * 部署后修改此文件中的 API 地址
  */
 
-// EdgeOne Pages Functions production 默认域名
-var BAIDU_PAN_API = 'https://film-index-generator-baidu-0l3or4l4.edgeone.cool';
+// Cloudflare Workers API 地址
+var BAIDU_PAN_API = 'https://film-index-baidu-pan.1946378724.workers.dev';
 
 // 支持的图片格式
 var SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.raw', '.tiff', '.tif'];

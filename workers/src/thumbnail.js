@@ -1,5 +1,4 @@
-import { openPayload } from './lib/crypto.js';
-import { corsHeaders, errorResponse } from './lib/http.js';
+import { decryptToken } from './lib/crypto.js';
 
 const ALLOWED_IMAGE_TYPES = new Set([
   'image/jpeg',
@@ -7,44 +6,78 @@ const ALLOWED_IMAGE_TYPES = new Set([
   'image/webp'
 ]);
 
-export async function handleThumbnail(request, env) {
-  if (request.method !== 'GET') {
-    return errorResponse(request, env, 405, 'Method not allowed', 'METHOD_NOT_ALLOWED');
-  }
+async function getTokenFromCookie(request, encryptionKey) {
+  const cookieHeader = request.headers.get('Cookie') || '';
+  const match = cookieHeader.match(/bd_token=([^;]+)/);
+  if (!match) return null;
 
+  try {
+    return JSON.parse(await decryptToken(match[1], encryptionKey));
+  } catch (error) {
+    return null;
+  }
+}
+
+function jsonResponse(origin, status, error, code) {
+  return new Response(JSON.stringify({ error, code }), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...corsHeaders(origin)
+    }
+  });
+}
+
+export async function handleThumbnail(request, env, ctx) {
+  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
   const url = new URL(request.url);
   const ticket = url.searchParams.get('ticket');
+
   if (!ticket) {
-    return errorResponse(request, env, 400, 'Missing thumbnail ticket', 'INVALID_THUMBNAIL_TICKET');
+    return jsonResponse(origin, 400, 'Missing thumbnail ticket', 'INVALID_THUMBNAIL_TICKET');
+  }
+
+  const tokenData = await getTokenFromCookie(request, env.TOKEN_ENCRYPTION_KEY);
+  if (!tokenData?.access_token) {
+    return jsonResponse(origin, 401, 'Not authenticated', 'NOT_AUTHENTICATED');
   }
 
   let payload;
   try {
-    payload = await openPayload(
-      ticket,
-      'baidu-thumbnail',
-      env.TOKEN_ENCRYPTION_KEY
-    );
+    payload = JSON.parse(await decryptToken(ticket, env.TOKEN_ENCRYPTION_KEY));
   } catch (error) {
-    return errorResponse(request, env, 410, 'Thumbnail ticket expired', 'THUMBNAIL_TICKET_EXPIRED');
+    return jsonResponse(origin, 400, 'Invalid thumbnail ticket', 'INVALID_THUMBNAIL_TICKET');
   }
 
   if (
+    payload?.version !== 1 ||
+    payload?.purpose !== 'baidu-thumbnail' ||
     typeof payload.fsId !== 'string' ||
     !payload.fsId ||
-    typeof payload.sourceUrl !== 'string'
+    typeof payload.accountFingerprint !== 'string' ||
+    typeof payload.sourceUrl !== 'string' ||
+    !Number.isFinite(payload.expiresAt)
   ) {
-    return errorResponse(request, env, 400, 'Invalid thumbnail ticket', 'INVALID_THUMBNAIL_TICKET');
+    return jsonResponse(origin, 400, 'Invalid thumbnail ticket', 'INVALID_THUMBNAIL_TICKET');
+  }
+
+  if (payload.expiresAt < Date.now()) {
+    return jsonResponse(origin, 410, 'Thumbnail ticket expired', 'THUMBNAIL_TICKET_EXPIRED');
+  }
+
+  if (payload.accountFingerprint !== await tokenFingerprint(tokenData.access_token)) {
+    return jsonResponse(origin, 403, 'Thumbnail ticket does not belong to this account', 'INVALID_THUMBNAIL_TICKET');
   }
 
   let sourceUrl;
   try {
     sourceUrl = new URL(payload.sourceUrl);
   } catch (error) {
-    return errorResponse(request, env, 400, 'Invalid thumbnail ticket', 'INVALID_THUMBNAIL_TICKET');
+    return jsonResponse(origin, 400, 'Invalid thumbnail ticket', 'INVALID_THUMBNAIL_TICKET');
   }
+
   if (sourceUrl.protocol !== 'https:') {
-    return errorResponse(request, env, 400, 'Invalid thumbnail source', 'INVALID_THUMBNAIL_TICKET');
+    return jsonResponse(origin, 400, 'Invalid thumbnail source', 'INVALID_THUMBNAIL_TICKET');
   }
 
   try {
@@ -56,9 +89,10 @@ export async function handleThumbnail(request, env) {
       redirect: 'follow',
       signal: request.signal
     });
+
     if (!response.ok) {
       console.error('Thumbnail upstream failed', { status: response.status });
-      return errorResponse(request, env, 502, 'Thumbnail unavailable', 'THUMBNAIL_UPSTREAM_FAILED');
+      return jsonResponse(origin, 502, 'Thumbnail unavailable', 'THUMBNAIL_UPSTREAM_FAILED');
     }
 
     const contentType = (response.headers.get('Content-Type') || '')
@@ -67,7 +101,7 @@ export async function handleThumbnail(request, env) {
       .toLowerCase();
     if (!ALLOWED_IMAGE_TYPES.has(contentType)) {
       console.error('Thumbnail upstream returned unsupported content', { contentType });
-      return errorResponse(request, env, 502, 'Unsupported thumbnail response', 'THUMBNAIL_UPSTREAM_FAILED');
+      return jsonResponse(origin, 502, 'Unsupported thumbnail response', 'THUMBNAIL_UPSTREAM_FAILED');
     }
 
     return new Response(response.body, {
@@ -76,11 +110,23 @@ export async function handleThumbnail(request, env) {
         'Content-Disposition': 'inline',
         'X-Content-Type-Options': 'nosniff',
         'Cache-Control': 'private, max-age=300',
-        ...corsHeaders(request, env)
+        ...corsHeaders(origin)
       }
     });
   } catch (error) {
-    if (error.name === 'AbortError') throw error;
-    return errorResponse(request, env, 502, 'Thumbnail unavailable', 'THUMBNAIL_UPSTREAM_FAILED');
+    return jsonResponse(origin, 502, 'Thumbnail unavailable', 'THUMBNAIL_UPSTREAM_FAILED');
   }
+}
+
+async function tokenFingerprint(accessToken) {
+  const data = new TextEncoder().encode(accessToken);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function corsHeaders(origin) {
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true'
+  };
 }

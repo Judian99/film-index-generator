@@ -2,12 +2,14 @@
 
 set -e
 
-printf '%s\n' "===== EdgeOne Pages 百度网盘后端 ====="
-printf '%s\n' "1. npm install"
-printf '%s\n' "2. npx edgeone login"
-printf '%s\n' "3. npx edgeone makers init"
-printf '%s\n' "4. npx edgeone makers link"
-printf '%s\n' "5. 在 EdgeOne 控制台配置 README.md 列出的环境变量"
-printf '%s\n' "6. npm test && npm run edgeone:deploy"
+printf '%s\n' "===== 百度网盘开放平台配置 ====="
+printf '%s\n' "请确保已在百度开放平台创建应用并配置 Worker 回调地址。"
 printf '%s\n' ""
-printf '%s\n' "不要将百度 Secret 或 TOKEN_ENCRYPTION_KEY 写入仓库或命令历史。"
+printf '%s\n' "设置 Cloudflare Workers Secrets："
+printf '%s\n' "  npx wrangler secret put BAIDU_CLIENT_ID"
+printf '%s\n' "  npx wrangler secret put BAIDU_CLIENT_SECRET"
+printf '%s\n' "  npx wrangler secret put TOKEN_ENCRYPTION_KEY"
+printf '%s\n' ""
+printf '%s\n' "TOKEN_ENCRYPTION_KEY 必须是随机生成的 32 字节密钥。"
+printf '%s\n' "设置完成后运行："
+printf '%s\n' "  npx wrangler deploy"

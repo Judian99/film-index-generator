@@ -995,7 +995,7 @@
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(2, pending.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(3, pending.length) }, worker));
     return failures;
   }
 
@@ -3058,23 +3058,9 @@
   setupTunePanel();
 
   // ---- 百度网盘集成 ----
-  const API_BASE = (typeof BAIDU_PAN_API !== 'undefined' && BAIDU_PAN_API)
-    ? BAIDU_PAN_API.replace(/\/$/, '')
-    : '';
-  const BAIDU_SESSION_KEY = 'baidu_pan_session';
-  const BAIDU_VERIFIER_KEY = 'baidu_pan_verifier';
-
-  function base64Url(bytes) {
-    let value = '';
-    bytes.forEach(byte => { value += String.fromCharCode(byte); });
-    return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-  }
-
-  async function createAuthorizationProof() {
-    const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)));
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-    return { verifier, challenge: base64Url(new Uint8Array(digest)) };
-  }
+  const API_BASE = (typeof BAIDU_PAN_API !== 'undefined')
+    ? BAIDU_PAN_API
+    : 'https://film-index-baidu-pan.1946378724.workers.dev';
 
   const BaiduPanIntegration = {
     isLoggedIn: false,
@@ -3086,84 +3072,43 @@
     directoryAbortController: null,
     previewAbortController: null,
 
-    getSession() {
-      return sessionStorage.getItem(BAIDU_SESSION_KEY) || '';
-    },
-
-    clearSession() {
-      sessionStorage.removeItem(BAIDU_SESSION_KEY);
-      this.isLoggedIn = false;
-    },
-
-    async apiFetch(path, options = {}) {
-      if (!API_BASE) throw new Error('百度网盘 API 尚未配置');
-      const headers = new Headers(options.headers || {});
-      const session = this.getSession();
-      if (session) headers.set('Authorization', `Bearer ${session}`);
-      const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
-      if (response.status === 401) this.clearSession();
-      return response;
-    },
-
-    async exchangeAuthorizationHandoff() {
-      const fragment = new URLSearchParams(location.hash.slice(1));
-      const handoff = fragment.get('baidu_auth');
-      if (!handoff) return false;
-      history.replaceState(null, '', `${location.pathname}${location.search}`);
-      const verifier = sessionStorage.getItem(BAIDU_VERIFIER_KEY);
-      sessionStorage.removeItem(BAIDU_VERIFIER_KEY);
-      if (!verifier) throw new Error('授权校验信息已丢失，请重新登录');
-      const response = await this.apiFetch('/auth/exchange', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ handoff, verifier })
-      });
-      if (!response.ok) throw new Error(await this.responseError(response, '百度授权交换失败'));
-      const data = await response.json();
-      if (!data.session) throw new Error('百度授权响应无效');
-      sessionStorage.setItem(BAIDU_SESSION_KEY, data.session);
-      this.isLoggedIn = true;
-      return true;
-    },
-
+    /** 检查登录状态 */
     async checkAuthStatus() {
-      if (!this.getSession()) {
-        this.isLoggedIn = false;
-        return { logged_in: false, user: null };
-      }
       try {
-        const res = await this.apiFetch('/status');
+        const res = await fetch(`${API_BASE}/status`, {
+          credentials: 'include'
+        });
         const data = await res.json();
-        this.isLoggedIn = Boolean(data.logged_in);
-        if (!this.isLoggedIn) this.clearSession();
+        this.isLoggedIn = data.logged_in;
         return data;
       } catch (e) {
-        this.clearSession();
+        this.isLoggedIn = false;
         return { logged_in: false, error: e.message };
       }
     },
 
-    async login() {
-      if (!API_BASE) throw new Error('百度网盘 API 尚未配置');
-      const proof = await createAuthorizationProof();
-      sessionStorage.setItem(BAIDU_VERIFIER_KEY, proof.verifier);
-      window.location.href = `${API_BASE}/auth?challenge=${encodeURIComponent(proof.challenge)}`;
+    /** 发起登录 */
+    login() {
+      window.location.href = `${API_BASE}/auth?t=${Date.now()}`;
     },
 
+    /** 登出 */
     async logout() {
       try {
-        await this.apiFetch('/logout', { method: 'POST' });
+        await fetch(`${API_BASE}/logout`, {
+          credentials: 'include'
+        });
+        this.isLoggedIn = false;
       } catch (e) {
         console.error('Logout error:', e);
-      } finally {
-        this.clearSession();
       }
     },
 
+    /** 获取文件列表 */
     async listFiles(path = '/', signal) {
-      const res = await this.apiFetch(
-        `/files?path=${encodeURIComponent(path)}`,
-        { signal }
+      const res = await fetch(
+        `${API_BASE}/files?path=${encodeURIComponent(path)}`,
+        { credentials: 'include', signal }
       );
       if (!res.ok) {
         let data = null;
@@ -3188,17 +3133,18 @@
     },
 
     async fetchThumbnail(url, signal) {
-      const res = await fetch(url, { signal });
+      const res = await fetch(url, { credentials: 'include', signal });
       if (!res.ok) throw new Error(await this.responseError(res, '缩略图加载失败'));
       const blob = await res.blob();
       if (!/^image\/(jpeg|png|webp)$/.test(blob.type)) throw new Error('缩略图格式无效');
       return blob;
     },
 
+    /** 下载文件 */
     async downloadFile(fsId, signal) {
-      const res = await this.apiFetch(
-        `/download?fs_id=${encodeURIComponent(fsId)}`,
-        { signal }
+      const res = await fetch(
+        `${API_BASE}/download?fs_id=${encodeURIComponent(fsId)}`,
+        { credentials: 'include', signal }
       );
       if (!res.ok) throw new Error(await this.responseError(res, '原图下载失败'));
       return res.blob();
@@ -3208,7 +3154,7 @@
     async openBrowser() {
       if (!this.isLoggedIn) {
         const ok = confirm('需要登录百度网盘账号才能导入照片。\n点击确定前往百度授权页面。');
-        if (ok) await this.login();
+        if (ok) this.login();
         return;
       }
 
@@ -3440,6 +3386,7 @@
       if (file.thumbnail_url) {
         const thumbnail = document.createElement('img');
         thumbnail.className = 'baidu-pan-item-thumbnail';
+        thumbnail.crossOrigin = 'use-credentials';
         thumbnail.src = file.thumbnail_url;
         thumbnail.alt = '';
         thumbnail.loading = 'lazy';
@@ -3600,27 +3547,10 @@
   `;
   dropZone.parentNode.insertBefore(baiduPanButton, dropZone.nextSibling);
 
-  const initializeBaiduAuthorization = async () => {
-    if (!location.hash.includes('baidu_auth=')) return;
-    try {
-      await BaiduPanIntegration.exchangeAuthorizationHandoff();
-      showNotice('百度网盘授权成功');
-    } catch (error) {
-      BaiduPanIntegration.clearSession();
-      showNotice(error.message);
-    }
-  };
-  const baiduAuthorizationPromise = initializeBaiduAuthorization();
-
   baiduPanButton.addEventListener('click', async () => {
-    if (!API_BASE) {
-      showNotice('百度网盘 API 尚未配置');
-      return;
-    }
     baiduPanButton.disabled = true;
     baiduPanButton.innerHTML = '<span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>检查登录状态...';
     try {
-      await baiduAuthorizationPromise;
       await BaiduPanIntegration.checkAuthStatus();
       await BaiduPanIntegration.openBrowser();
     } catch (e) {

@@ -1,105 +1,293 @@
-# EdgeOne Pages 百度网盘后端部署
+# 百度网盘照片导入功能 - 部署指南
 
-前端继续部署在 GitHub Pages，本目录只部署百度 OAuth、目录读取、缩略图和原图代理。
+本目录包含 Cloudflare Workers API 代理服务，用于实现百度网盘照片导入功能。
 
-## 架构
+---
 
-```text
-GitHub Pages 前端
-  -> Authorization: Bearer <短期加密会话>
-EdgeOne Pages Edge Functions
-  -> 百度网盘开放平台 API
+## 架构说明
+
+```
+用户浏览器 (GitHub Pages)
+    ↓ API 调用
+Cloudflare Workers (本目录)
+    ↓ API 调用
+百度网盘开放平台 API
 ```
 
-浏览器不保存百度 access token，也不依赖第三方 Cookie。EdgeOne callback 通过 URL fragment 返回一个 5 分钟 handoff，前端用当前标签页保存的 verifier 换取 8 小时加密会话。关闭标签页会清除 `sessionStorage`。
+**核心特性：**
+- ✅ 完全免费（Cloudflare Workers 每天 10 万次请求免费）
+- ✅ 国内访问稳定（Cloudflare 在国内有 CDN 节点）
+- ✅ 无需服务器（零运维）
+- ✅ 用户隐私保护（图片流式传输，不落地存储）
 
-## 1. 准备百度应用
+---
 
-在百度网盘开放平台创建 Web 应用，保存 AppKey 和 SecretKey。首次部署 EdgeOne 后，将授权回调设置为固定 production 默认域名：
+## 部署步骤
 
-```text
-https://<edgeone-production-domain>/callback
+### 步骤 1：注册百度网盘开放平台
+
+1. 访问 [百度网盘开放平台](https://pan.baidu.com/union/)
+2. 登录百度账号并完成实名认证
+3. 创建应用：
+   - 应用名称：film-index-generator（或自定义）
+   - 应用类型：Web 应用
+   - 应用描述：胶卷索引图生成工具，支持从百度网盘导入照片
+4. 获取 `client_id` 和 `client_secret`
+5. 配置授权回调 URL（步骤 3 完成后填写）
+
+### 步骤 2：安装 Wrangler CLI
+
+```bash
+# 安装 Wrangler
+npm install -g wrangler
+
+# 登录 Cloudflare
+wrangler login
 ```
 
-不要使用每次部署可能变化的 preview URL。
+### 步骤 3：配置环境变量
 
-## 2. 安装并初始化
+创建 Cloudflare Workers Secrets（敏感信息不提交到代码仓库）：
+
+```bash
+# 进入 workers 目录
+cd workers
+
+# 设置百度网盘 API 密钥
+wrangler secret put BAIDU_CLIENT_ID
+# 输入您的 client_id
+
+wrangler secret put BAIDU_CLIENT_SECRET
+# 输入您的 client_secret
+
+wrangler secret put TOKEN_ENCRYPTION_KEY
+# 输入一个 32 字符的随机字符串，用于加密 token
+# 可使用: openssl rand -base64 32 | cut -c1-32
+```
+
+编辑 `wrangler.toml`，分别设置授权后的前端跳转地址和 CORS 来源：
+
+```toml
+[vars]
+FRONTEND_URL = "https://your-username.github.io/film-index-generator/"
+FRONTEND_ORIGIN = "https://your-username.github.io"
+```
+
+### 步骤 4：部署 Workers
+
+```bash
+# 部署到 Cloudflare
+wrangler deploy
+```
+
+部署成功后，您会获得一个 Workers 地址，例如：
+```
+https://film-index-baidu-pan.workers.dev
+```
+
+### 步骤 5：更新前端配置
+
+修改主项目的 `baidu-pan-config.js`：
+
+```javascript
+var BAIDU_PAN_API = 'https://film-index-baidu-pan.workers.dev';
+```
+
+### 步骤 6：配置百度网盘回调 URL
+
+回到百度网盘开放平台，配置授权回调 URL：
+```
+https://film-index-baidu-pan.workers.dev/callback
+```
+
+### 步骤 7：提交审核
+
+- 开发阶段可使用自己的百度账号测试
+- 应用上线前需要提交审核
+- 审核周期约 3-7 个工作日
+- 准备应用说明文档和演示截图
+
+---
+
+## 本地开发测试
+
+### 启动本地 Workers
 
 ```bash
 cd workers
-npm install
-npx edgeone login
-npx edgeone makers init
-npx edgeone makers link
+wrangler dev
 ```
 
-初始化时保留现有 `edge-functions/`，不要覆盖其中的路由。`link` 用于关联 Direct Upload 项目和同步控制台环境变量。
+本地 Workers 会运行在 `http://localhost:8787`
 
-## 3. 配置生产环境变量
+### 修改前端配置
 
-在 EdgeOne 项目控制台配置：
-
-| 变量 | 值 |
-|---|---|
-| `FRONTEND_URL` | `https://judian99.github.io/film-index-generator/` |
-| `FRONTEND_ORIGIN` | `https://judian99.github.io` |
-| `API_ORIGIN` | `https://<edgeone-production-domain>` |
-| `BAIDU_CLIENT_ID` | 百度 AppKey |
-| `BAIDU_CLIENT_SECRET` | 百度 SecretKey |
-| `TOKEN_ENCRYPTION_KEY` | 随机且恰好 32 个 UTF-8 字节 |
-| `SESSION_TTL_SECONDS` | `28800` |
-| `HANDOFF_TTL_SECONDS` | `300` |
-| `MAX_DOWNLOAD_BYTES` | `104857600` |
-
-不要把敏感变量写进仓库、命令历史或截图。更换加密密钥会让所有现有会话失效。
-
-## 4. 测试与部署
-
-```bash
-npm test
-npm run edgeone:dev
-npm run edgeone:deploy
-```
-
-连续执行两次 production 部署，确认 production 默认域名保持不变，再配置百度 callback。
-
-## 5. 切换 GitHub Pages
-
-部署成功后修改仓库根目录 `baidu-pan-config.js`：
+临时修改 `baidu-pan-config.js` 指向本地：
 
 ```javascript
-var BAIDU_PAN_API = 'https://<edgeone-production-domain>';
+var BAIDU_PAN_API = 'http://localhost:8787';
 ```
 
-提交并等待 GitHub Pages 发布。未填写该地址时，百度网盘入口会明确提示尚未配置，不会回退到旧 Cloudflare Worker。
+### 启动前端本地服务器
 
-## API
+```bash
+# 在主项目目录
+python -m http.server 8000
+# 或
+npx serve .
+```
 
-| 端点 | 方法 | 认证 | 说明 |
-|---|---|---|---|
-| `/auth` | GET | challenge | 跳转百度授权 |
-| `/callback` | GET | OAuth state | 百度回调并生成 handoff |
-| `/auth/exchange` | POST | verifier | 换取短期加密会话 |
-| `/status` | GET | Bearer | 检查授权状态 |
-| `/files` | GET | Bearer | 读取目录和缩略图票据 |
-| `/thumbnail` | GET | 短期 ticket | 流式代理低清图 |
-| `/download` | GET | Bearer | 流式代理原图 |
-| `/logout` | POST | Origin | 清理前端会话 |
+访问 `http://localhost:8000` 进行测试。
 
-## 安全边界
+**注意：** 本地测试时，OAuth 回调需要在百度开放平台添加本地地址：
+```
+http://localhost:8787/callback
+```
 
-- 百度 Secret 和 access token 只在 EdgeOne 函数中出现。
-- 浏览器 `sessionStorage` 保存的是 AES-GCM 加密的 8 小时会话，不是明文百度 token。
-- 无状态会话无法在服务端即时吊销；登出会清除当前标签页凭证，密文最晚在 8 小时后失效。用户也可在百度侧取消应用授权。
-- 缩略图 ticket 有效 10 分钟，只允许读取单张低清图，不授予目录或原图权限。
-- 原图默认最大 100 MiB，函数只流式转发，不落地、不在服务端缓冲完整文件。
-- CORS 只允许 `https://judian99.github.io`，不使用跨站 Cookie。
+---
 
-## 上线验收
+## 环境变量说明
 
-1. Chrome 禁止第三方 Cookie、Firefox 和 Safari/隐私模式均能登录。
-2. callback 返回后地址栏 fragment 立即消失。
-3. 浏览器历史、Network 和 EdgeOne 日志中没有明文百度 token、Client Secret 或完整 dlink。
-4. 目录、跨目录多选、缩略图、裁切/旋转、拍摄时间排序和导出正常。
-5. 测试 5、25、75、100 MiB 原图以及两个 75 MiB 并发请求；确认无截断、超时或 EdgeOne 5xx。
-6. 切换后保留旧 Cloudflare Worker 48 小时；回滚时必须同时恢复旧前端、API 地址和百度 callback。
+| 变量名 | 说明 | 是否必需 |
+|--------|------|---------|
+| `BAIDU_CLIENT_ID` | 百度网盘开放平台应用 ID | ✅ 必需 |
+| `BAIDU_CLIENT_SECRET` | 百度网盘开放平台应用密钥 | ✅ 必需 |
+| `TOKEN_ENCRYPTION_KEY` | Token 加密密钥（32字符） | ✅ 必需 |
+| `FRONTEND_URL` | OAuth 成功后的完整前端跳转地址 | ✅ 必需 |
+| `FRONTEND_ORIGIN` | CORS 允许的前端来源，仅包含协议和域名 | ✅ 必需 |
+
+---
+
+## API 端点说明
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/auth` | GET | 发起 OAuth 授权，重定向到百度 |
+| `/callback` | GET | OAuth 回调，换取 token 并存入 Cookie |
+| `/status` | GET | 检查登录状态，返回用户信息 |
+| `/files` | GET | 获取文件列表（参数：path, page, num） |
+| `/download` | GET | 下载文件（参数：fs_id） |
+| `/logout` | GET | 清除登录状态 |
+
+---
+
+## 常见问题
+
+### 1. OAuth 授权失败
+
+**可能原因：**
+- 回调 URL 配置不正确
+- Client ID 或 Client Secret 错误
+- 应用未通过审核（开发阶段用测试账号）
+
+**解决方法：**
+- 检查百度开放平台的回调 URL 配置
+- 确认 Workers 地址与回调 URL 一致
+- 查看 Workers 日志：`wrangler tail`
+
+### 2. 文件下载失败
+
+**可能原因：**
+- Token 过期
+- 文件不存在或无权限
+- 百度 API 限流
+
+**解决方法：**
+- 重新登录授权
+- 检查文件是否存在于用户网盘
+- 等待一段时间后重试
+
+### 3. CORS 错误
+
+**可能原因：**
+- `FRONTEND_ORIGIN` 配置不正确
+- Cookie 设置问题
+
+**解决方法：**
+- 确认 `wrangler.toml` 中的 `FRONTEND_ORIGIN` 只包含协议和域名，不包含路径
+- 确保使用 HTTPS（生产环境）
+
+### 4. Workers 脚本大小超限
+
+Cloudflare Workers 免费版限制脚本大小 1MB。
+
+**解决方法：**
+- 检查是否有不必要的依赖
+- 代码已经优化，通常不会超限
+
+---
+
+## 隐私与安全
+
+### 数据处理原则
+
+1. **图片不落地存储**
+   - Workers 只代理 API 调用
+   - 图片以流的方式传输到浏览器
+   - Workers 不保存任何用户照片
+
+2. **Token 安全**
+   - 使用 AES-256-GCM 加密存储
+   - HTTP-only Cookie 防止 XSS
+   - Secure Cookie（仅 HTTPS）
+   - SameSite=None 支持 GitHub Pages 到 Worker 的跨站请求
+
+3. **最小权限**
+   - 只请求 `basic` 和 `netdisk` 权限
+   - 不请求上传、删除等高级权限
+
+### 用户权利
+
+- 用户可随时在百度网盘取消授权
+- 提供登出功能清除 Cookie
+- 数据仅用于生成索引图，不作他用
+
+---
+
+## 费用说明
+
+### Cloudflare Workers 免费额度
+
+| 资源 | 免费额度 |
+|------|----------|
+| 请求数 | 每天 10 万次 |
+| CPU 时间 | 每次请求 10ms |
+| 带宽 | 无限制 |
+
+### 使用预估
+
+对于个人应用的典型使用场景：
+- 每天登录检查：1 次
+- 浏览文件列表：5-10 次
+- 下载照片：每张照片 1 次
+
+**假设每天 100 个用户，每人下载 50 张照片：**
+- 每天请求：约 5600 次
+- **远低于 10 万次/天的免费额度**
+
+---
+
+## 故障排查
+
+### 查看 Workers 日志
+
+```bash
+wrangler tail
+```
+
+### 常见错误码
+
+| 错误码 | 说明 | 解决方法 |
+|--------|------|---------|
+| 401 | 未授权 | 重新登录 |
+| 403 | 权限不足 | 检查应用权限配置 |
+| 404 | 资源不存在 | 检查文件路径 |
+| 500 | 服务器错误 | 查看日志排查 |
+
+---
+
+## 联系与支持
+
+- **GitHub Issues**: [film-index-generator](https://github.com/Judian99/film-index-generator/issues)
+- **百度网盘开放平台文档**: https://pan.baidu.com/union/doc/
+- **Cloudflare Workers 文档**: https://developers.cloudflare.com/workers/
