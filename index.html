@@ -23,41 +23,49 @@
           </div>
         </div>
 
-        <label class="drop-zone" id="dropZone">
-          <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple />
-          <span class="drop-icon" aria-hidden="true">+</span>
-          <span class="drop-title">选择或拖入扫描件</span>
-          <span class="drop-subtitle">JPG / PNG / WebP，按本地文件处理</span>
-        </label>
-
-        <section class="panel" aria-label="排序">
-          <h2>排序</h2>
-          <div class="segmented segmented-3" role="radiogroup" aria-label="排序方式">
-            <label>
-              <input type="radio" name="sortMode" value="name" checked />
-              <span>名称</span>
-            </label>
-            <label>
-              <input type="radio" name="sortMode" value="time" />
-              <span>时间</span>
-            </label>
-            <label>
-              <input type="radio" name="sortMode" value="custom" />
-              <span>自定义</span>
-            </label>
-          </div>
-          <label class="checkbox-row">
-            <input id="reverseSort" type="checkbox" />
-            <span>倒序</span>
+        <details class="panel advanced-panel workflow-panel" id="sourcePanel" open>
+          <summary><h2>导入与整理</h2></summary>
+          <label class="drop-zone" id="dropZone">
+            <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+            <span class="drop-icon" aria-hidden="true">+</span>
+            <span class="drop-title">选择或拖入扫描件</span>
+            <span class="drop-subtitle">JPG / PNG / WebP，按本地文件处理</span>
           </label>
-          <p class="hint">时间排序优先使用 EXIF 拍摄时间，没有时退回文件修改时间。直接在预览图上拖动某一帧、或在照片列表中拖拽，都会切换为自定义排序。</p>
-        </section>
 
-        <section class="panel" id="photoListPanel" aria-label="照片列表" style="display: none">
-          <h2>照片列表</h2>
-          <ul class="photo-list" id="photoList"></ul>
-          <button id="clearButton" class="text-button" type="button">清空全部</button>
-        </section>
+          <section class="panel-section" aria-label="排序">
+            <h3>排序</h3>
+            <div class="segmented segmented-3" role="radiogroup" aria-label="排序方式">
+              <label>
+                <input type="radio" name="sortMode" value="name" checked />
+                <span>名称</span>
+              </label>
+              <label>
+                <input type="radio" name="sortMode" value="time" />
+                <span>时间</span>
+              </label>
+              <label>
+                <input type="radio" name="sortMode" value="custom" />
+                <span>自定义</span>
+              </label>
+            </div>
+            <label class="checkbox-row">
+              <input id="reverseSort" type="checkbox" />
+              <span>倒序</span>
+            </label>
+            <p class="hint">时间排序优先使用 EXIF 拍摄时间，没有时退回文件修改时间。直接在预览图上拖动某一帧、或在照片列表中拖拽，都会切换为自定义排序。</p>
+          </section>
+
+          <details class="panel-section photo-list-section" id="photoListPanel" hidden>
+            <summary>
+              <span>照片列表</span>
+              <span class="photo-list-count" id="photoListCount">0 张</span>
+            </summary>
+            <div class="photo-list-content">
+              <ul class="photo-list" id="photoList"></ul>
+              <button id="clearButton" class="text-button" type="button">清空全部</button>
+            </div>
+          </details>
+        </details>
 
         <section class="panel" aria-label="胶片外观">
           <h2>胶片外观</h2>
@@ -84,6 +92,19 @@
             <span>模拟片头片尾</span>
           </label>
           <small id="leaderHint" class="field-hint" hidden></small>
+          <label class="field stock-search-field">
+            <span>搜索胶卷型号</span>
+            <input
+              id="stockSearch"
+              type="search"
+              placeholder="名称、边字或冲洗工艺"
+              autocomplete="off"
+              spellcheck="false"
+              aria-controls="stockSelect"
+              aria-describedby="stockSearchStatus"
+            />
+          </label>
+          <p id="stockSearchStatus" class="field-hint stock-search-status" aria-live="polite"></p>
           <label class="field">
             <span>胶卷型号</span>
             <select id="stockSelect"></select>
@@ -144,8 +165,8 @@
           </div>
         </details>
 
-        <section class="panel" aria-label="输出">
-          <h2>输出</h2>
+        <details class="panel advanced-panel workflow-panel" id="outputPanel">
+          <summary><h2>输出</h2></summary>
           <label class="field">
             <span>画幅</span>
             <select id="frameAspect">
@@ -222,7 +243,7 @@
             <input id="jpgQuality" type="range" min="70" max="100" value="92" />
           </label>
           <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
-        </section>
+        </details>
 
         <details class="panel advanced-panel" id="advancedPanel">
           <summary><h2>高级设置</h2></summary>
@@ -230,7 +251,8 @@
           <div id="tuneFields"></div>
         </details>
 
-        <div class="panel about-panel">
+        <details class="panel advanced-panel about-panel">
+          <summary><h2>关于</h2></summary>
           <p class="about-text">
             <strong>海带索引图 FILM</strong><br />
             作者: Judian99<br />
@@ -239,7 +261,7 @@
             邮箱: <a href="mailto:1946378724@qq.com">1946378724@qq.com</a>
           </p>
           <a href="https://github.com/Judian99/film-index-generator" target="_blank" rel="noopener" class="text-button">GitHub 项目主页</a>
-        </div>
+        </details>
       </aside>
 
       <section class="workspace" aria-label="预览">

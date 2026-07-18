@@ -43,10 +43,12 @@ select {
 .controls {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  padding: 18px;
   background: rgba(255, 255, 255, 0.86);
   border-right: 1px solid rgba(23, 25, 28, 0.1);
   backdrop-filter: blur(18px);
@@ -90,8 +92,8 @@ select {
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 156px;
-  padding: 22px;
+  min-height: 118px;
+  padding: 16px;
   border: 1.5px dashed #aab2ba;
   border-radius: 8px;
   background: rgba(245, 241, 232, 0.74);
@@ -145,7 +147,7 @@ select {
 .panel {
   display: grid;
   gap: 12px;
-  padding: 16px;
+  padding: 14px;
   border: 1px solid rgba(23, 25, 28, 0.1);
   border-radius: 8px;
   background: var(--panel);
@@ -179,10 +181,8 @@ select {
 .photo-list {
   display: grid;
   gap: 6px;
-  max-height: 280px;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
 }
 
@@ -262,7 +262,7 @@ select {
   transform: translateX(-50%) translateY(0);
 }
 
-.advanced-panel summary {
+.advanced-panel > summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -271,11 +271,11 @@ select {
   user-select: none;
 }
 
-.advanced-panel summary::-webkit-details-marker {
+.advanced-panel > summary::-webkit-details-marker {
   display: none;
 }
 
-.advanced-panel summary::after {
+.advanced-panel > summary::after {
   content: "";
   width: 8px;
   height: 8px;
@@ -285,7 +285,7 @@ select {
   transition: transform 0.15s ease;
 }
 
-.advanced-panel[open] summary::after {
+.advanced-panel[open] > summary::after {
   transform: rotate(-135deg);
 }
 
@@ -322,8 +322,88 @@ select {
   flex: 1;
 }
 
-.advanced-panel summary h2 {
+.advanced-panel > summary h2 {
   margin: 0;
+}
+
+.workflow-panel > summary {
+  min-height: 24px;
+}
+
+.panel-section {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(23, 25, 28, 0.09);
+}
+
+.panel-section h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.photo-list-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.photo-list-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.photo-list-section > summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-left: 2px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.photo-list-section[open] > summary::after {
+  transform: rotate(-135deg);
+}
+
+.photo-list-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.photo-list-content {
+  display: grid;
+  gap: 10px;
+}
+
+.photo-list-section .text-button {
+  justify-self: stretch;
+}
+
+.stock-search-field {
+  padding-top: 4px;
+}
+
+.stock-search-status {
+  min-height: 1.45em;
+  margin: -3px 0 0;
+}
+
+.stock-search-status.is-empty {
+  color: #9a6420;
 }
 
 #tuneFields {
@@ -1154,6 +1234,9 @@ canvas {
   .controls {
     min-height: auto;
     overflow: visible;
+    overscroll-behavior: auto;
+    scrollbar-gutter: auto;
+    padding: 16px;
     border-right: 0;
     border-bottom: 1px solid rgba(23, 25, 28, 0.1);
   }
@@ -1530,9 +1613,7 @@ a:focus-visible {
 .preview-wrap {
   border-color: rgba(17, 22, 18, 0.18);
   border-radius: 6px;
-  background:
-    radial-gradient(circle at 50% 16%, rgba(227, 165, 58, 0.08), transparent 32%),
-    #cfd4cc;
+  background: radial-gradient(circle at 50% 16%, rgba(227, 165, 58, 0.06), transparent 32%);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.35),
     0 24px 60px rgba(17, 22, 18, 0.13);
@@ -1951,6 +2032,9 @@ a:focus-visible {
 /* 关于面板 */
 .about-panel {
   gap: 8px;
+}
+
+.about-panel[open] {
   text-align: center;
 }
 

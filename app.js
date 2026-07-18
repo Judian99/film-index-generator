@@ -30,6 +30,8 @@
   const showLeader = document.getElementById("showLeader");
   const leaderHint = document.getElementById("leaderHint");
   const stockSelect = document.getElementById("stockSelect");
+  const stockSearch = document.getElementById("stockSearch");
+  const stockSearchStatus = document.getElementById("stockSearchStatus");
   const stockName = document.getElementById("stockName");
   const stockEdgeText = document.getElementById("stockEdgeText");
   const stockProcess = document.getElementById("stockProcess");
@@ -60,6 +62,7 @@
   const zoomIn = document.getElementById("zoomIn");
   const zoomFit = document.getElementById("zoomFit");
   const photoListPanel = document.getElementById("photoListPanel");
+  const photoListCount = document.getElementById("photoListCount");
   const photoList = document.getElementById("photoList");
   const clearButton = document.getElementById("clearButton");
   const noticeEl = document.getElementById("notice");
@@ -155,6 +158,12 @@
     },
   };
   const PROCESS_NAMES = Object.keys(PROCESS_DEFAULTS);
+  const PROCESS_SEARCH_TERMS = {
+    "C-41": "彩色负片 彩负",
+    BW: "黑白负片 黑白",
+    "E-6": "反转片 正片",
+    "ECN-2": "电影卷 电影胶片",
+  };
 
   const BUILTIN_STOCKS = [
     // Kodak 彩色负片
@@ -1832,11 +1841,6 @@
     for (let y = firstStripe; y < bounds.y + bounds.height; y += 18) {
       ctx.fillRect(bounds.x, y, bounds.width, 1);
     }
-    const highlightH = Math.max(80, height * 0.08);
-    if (bounds.y < highlightH) {
-      ctx.fillStyle = "rgba(255,255,255,0.42)";
-      ctx.fillRect(bounds.x, bounds.y, bounds.width, Math.min(bounds.height, highlightH - bounds.y));
-    }
   }
 
   function drawFilmRow(items, rowInfo, x, y, layout, rowIndex, options, isPreview) {
@@ -2088,7 +2092,10 @@
   }
 
   function renderPhotoList() {
-    photoListPanel.style.display = state.items.length ? "grid" : "none";
+    const itemCount = state.items.length;
+    photoListPanel.hidden = itemCount === 0;
+    photoListCount.textContent = `${itemCount} 张`;
+    if (!itemCount) photoListPanel.open = false;
     photoList.innerHTML = "";
 
     getSortedItems().forEach((item) => {
@@ -3225,20 +3232,50 @@
     }
   }
 
-  function renderStockSelect() {
-    stockSelect.innerHTML = "";
-    const builtinGroup = document.createElement("optgroup");
-    builtinGroup.label = "内置型号";
-    BUILTIN_STOCKS.forEach((stock) => builtinGroup.appendChild(stockOption(stock)));
-    stockSelect.appendChild(builtinGroup);
+  function normalizeStockSearch(value) {
+    return String(value || "").trim().toLocaleLowerCase("zh-CN").replace(/\s+/g, " ");
+  }
 
-    if (state.customStocks.length) {
-      const customGroup = document.createElement("optgroup");
-      customGroup.label = "自定义型号";
-      state.customStocks.forEach((stock) => customGroup.appendChild(stockOption(stock)));
-      stockSelect.appendChild(customGroup);
+  function stockMatchesSearch(stock, query) {
+    if (!query) return true;
+    const searchable = normalizeStockSearch(
+      [stock.name, stock.edgeText, stock.process, PROCESS_SEARCH_TERMS[stock.process]].join(" "),
+    );
+    return query.split(" ").every((term) => searchable.includes(term));
+  }
+
+  function appendStockGroup(label, stocks) {
+    if (!stocks.length) return;
+    const group = document.createElement("optgroup");
+    group.label = label;
+    stocks.forEach((stock) => group.appendChild(stockOption(stock)));
+    stockSelect.appendChild(group);
+  }
+
+  function renderStockSelect() {
+    const query = normalizeStockSearch(stockSearch.value);
+    const activeStock = getActiveStock();
+    const builtinMatches = BUILTIN_STOCKS.filter((stock) => stockMatchesSearch(stock, query));
+    const customMatches = state.customStocks.filter((stock) => stockMatchesSearch(stock, query));
+    const matchedCount = builtinMatches.length + customMatches.length;
+    const activeMatches = stockMatchesSearch(activeStock, query);
+
+    stockSelect.innerHTML = "";
+    if (query && !activeMatches) appendStockGroup("当前选择", [activeStock]);
+    appendStockGroup("内置型号", builtinMatches);
+    appendStockGroup("自定义型号", customMatches);
+
+    stockSelect.value = activeStock.id;
+    stockSearchStatus.classList.toggle("is-empty", Boolean(query) && matchedCount === 0);
+    if (!query) {
+      stockSearchStatus.textContent = `显示全部 ${getAllStocks().length} 个型号`;
+    } else if (matchedCount === 0) {
+      stockSearchStatus.textContent = "未找到匹配型号，已保留当前选择";
+    } else {
+      stockSearchStatus.textContent = activeMatches
+        ? `找到 ${matchedCount} 个型号`
+        : `找到 ${matchedCount} 个型号，已保留当前选择`;
     }
-    stockSelect.value = getActiveStock().id;
   }
 
   function stockOption(stock) {
@@ -3366,6 +3403,8 @@
     loadStoredStocks();
     renderStockSelect();
     fillStockForm(getActiveStock());
+
+    stockSearch.addEventListener("input", renderStockSelect);
 
     stockSelect.addEventListener("change", () => {
       state.stockId = stockSelect.value;
