@@ -66,11 +66,16 @@
       central,
       regions,
       bounds: { x, y: top, w: options.slotW, h: bottom - top },
+      continuous: Boolean(options.imageInSprockets),
     };
   }
 
   function addExposurePath(ctx, geometry, radius) {
     ctx.beginPath();
+    if (geometry.continuous) {
+      ctx.rect(geometry.bounds.x, geometry.bounds.y, geometry.bounds.w, geometry.bounds.h);
+      return;
+    }
     geometry.regions.forEach((region, index) => {
       if (index === 0) {
         const r = Math.min(radius, region.w / 2, region.h / 2);
@@ -104,16 +109,18 @@
     addExposurePath(ctx, geometry, radius);
     ctx.clip();
     ctx.fillStyle = "#1b1b1b";
-    ctx.fillRect(central.x, central.y, central.w, central.h);
+    ctx.fillRect(geometry.bounds.x, geometry.bounds.y, geometry.bounds.w, geometry.bounds.h);
     ctx.globalAlpha = drawState.dragAlpha ?? 1;
     ctx.drawImage(item.source, drawX, drawY, drawW, drawH);
     ctx.globalAlpha = 1;
     ctx.restore();
 
-    roundedRect(ctx, central.x + 0.5, central.y + 0.5, central.w - 1, central.h - 1, radius);
-    ctx.strokeStyle = "rgba(255, 214, 150, 0.1)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    if (!geometry.continuous) {
+      roundedRect(ctx, central.x + 0.5, central.y + 0.5, central.w - 1, central.h - 1, radius);
+      ctx.strokeStyle = "rgba(255, 214, 150, 0.1)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
     return geometry;
   }
 
@@ -125,9 +132,11 @@
     ctx.fillStyle = "rgb(0, 0, 0)";
     geometry.regions.forEach((region) => ctx.fillRect(region.x, region.y, region.w, region.h));
     ctx.restore();
-    ctx.strokeStyle = "rgba(255, 248, 230, 0.03)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, options.slotW - 1, options.slotH - 1);
+    if (!geometry.continuous) {
+      ctx.strokeStyle = "rgba(255, 248, 230, 0.03)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, options.slotW - 1, options.slotH - 1);
+    }
     return geometry;
   }
 
