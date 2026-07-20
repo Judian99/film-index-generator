@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Three.js 片基 PBR Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="pbr-demo">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">THREE.JS · PHYSICAL FILM LAB</p>
+          <h1>真实 3D 片基 PBR</h1>
+          <p class="hero-copy">用真实薄片几何、曝光窗与齿孔穿孔、微表面粗糙度、摄影棚灯光和软阴影评估胶片的空间质感。页面仅在浏览器本地读取图片，不包含导出功能。</p>
+        </div>
+        <div class="renderer-badge" id="rendererBadge" data-mode="loading">正在初始化渲染器</div>
+      </header>
+
+      <section class="control-panel" aria-labelledby="controlsTitle">
+        <div class="panel-heading">
+          <div><p class="section-kicker">PBR CONTROLS</p><h2 id="controlsTitle">画幅与姿态</h2></div>
+          <p>横向拖动改变旋转，纵向拖动改变抬升。</p>
+        </div>
+        <div class="source-controls">
+          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" />
+          <label class="upload-button" for="imageInput"><span>＋</span>选择本地照片</label>
+          <button id="restoreSample" type="button">恢复内置样片</button>
+          <button id="resetAll" type="button">重置预览</button>
+          <p>也可拖入 JPG、PNG 或 WebP。图片不会上传。</p>
+        </div>
+        <div class="control-grid">
+          <label><span><b>预览尺寸</b><output id="previewScaleValue">100%</output></span><input id="previewScale" type="range" min="76" max="116" value="100" /></label>
+          <label><span><b>底片画幅</b></span><select id="filmFormat">
+            <option value="135">135 全画幅 · 36×24</option>
+            <option value="half-cropped">135 半格 · 单张裁切</option>
+            <option value="half-uncropped">135 半格 · 完整扫描</option>
+            <option value="xpan">XPan · 65×24</option>
+            <option value="135-69">135 超宽幅 · 84×24</option>
+            <option value="645">120 · 645</option><option value="66">120 · 6×6</option>
+            <option value="67">120 · 6×7</option><option value="69">120 · 6×9</option>
+            <option value="612">120 · 6×12</option><option value="617">120 · 6×17</option>
+          </select></label>
+        </div>
+      </section>
+
+      <section class="preview-section" aria-labelledby="previewTitle">
+        <div class="preview-heading">
+          <div><p class="section-kicker">REAL-TIME WEBGL</p><h2 id="previewTitle">单帧物理渲染</h2></div>
+          <p id="formatNote">135 全画幅 · 36 × 24 mm</p>
+        </div>
+        <figure class="preview-card">
+          <div class="canvas-stage" id="canvasStage" tabindex="0" role="img" aria-labelledby="previewTitle previewDesc">
+            <canvas id="webglCanvas"></canvas>
+            <canvas id="fallbackCanvas" hidden></canvas>
+            <span class="drag-hint">拖动调整姿态</span>
+          </div>
+          <figcaption>
+            <div><strong id="filmTitle">135 全画幅</strong><span id="filmRatio">36 × 24</span></div>
+            <p id="previewDesc">真实厚度、孔洞和弯曲由 Three.js 几何生成；材质使用 PBR 光照。</p>
+            <div class="actions">
+              <button id="toggleStructure" type="button" aria-pressed="false">显示结构层</button>
+              <button id="resetPose" type="button">重置姿态</button>
+            </div>
+          </figcaption>
+        </figure>
+      </section>
+
+      <aside class="notes"><p class="section-kicker">REVIEW NOTES</p><h2>评审重点</h2><ol>
+        <li>片基厚度、弯曲和齿孔内壁是否具有真实立体关系。</li>
+        <li>高光、粗糙度、软投影和接触阴影是否克制自然。</li>
+        <li>不同画幅和回退模式下，曝光窗与图片方向是否准确。</li>
+      </ol></aside>
+
+      <div class="drop-overlay" id="dropOverlay" aria-hidden="true"><div><span>↓</span><strong>松开以载入照片</strong><small>仅在浏览器本地读取</small></div></div>
+      <p class="sr-status" id="status" role="status" aria-live="polite">正在初始化。</p>
+    </main>
+
+    <script src="../../../film-frame-135.js"></script>
+    <script src="../../../film-frame.js"></script>
+    <script src="../single-frame-styles/style-renderer.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

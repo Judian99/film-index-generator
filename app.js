@@ -21,6 +21,7 @@
   const imageCounter = document.getElementById("imageCounter");
   const exportButton = document.getElementById("exportButton");
   const reverseSort = document.getElementById("reverseSort");
+  const sortSegmented = document.querySelector(".sort-segmented");
   const showEdgeText = document.getElementById("showEdgeText");
   const showSprockets = document.getElementById("showSprockets");
   const imageInSprockets = document.getElementById("imageInSprockets");
@@ -88,6 +89,12 @@
   const frameExportClose = document.getElementById("frameExportClose");
   const frameExportCancel = document.getElementById("frameExportCancel");
   const frameExportApply = document.getElementById("frameExportApply");
+  const exportModal = document.getElementById("exportModal");
+  const exportModalClose = document.getElementById("exportModalClose");
+  const exportModalCancel = document.getElementById("exportModalCancel");
+  const exportModalConfirm = document.getElementById("exportModalConfirm");
+  const exportModalSize = document.getElementById("exportModalSize");
+  const exportModalStatus = document.getElementById("exportModalStatus");
   const filmStage = document.getElementById("filmStage");
   const filmTitle = document.getElementById("filmTitle");
   const filmDescription = document.getElementById("filmDescription");
@@ -119,6 +126,7 @@
     manual135Columns: Number(columnsSelect.value) || 6,
     manualHalfColumns: Math.max(4, Number(columnsSelect.value) || 6),
     sortMode: document.querySelector("input[name='sortMode']:checked").value,
+    sortRequestGeneration: 0,
     exportHydrationItems: null,
     exportCancelled: false,
     sourceCommitPromise: Promise.resolve(),
@@ -381,25 +389,44 @@
   });
 
   const sortControls = Array.from(document.querySelectorAll("input[name='sortMode']"));
+  const sortModeIndexes = { name: 0, time: 1, custom: 2 };
+
+  function setSortMode(mode) {
+    const nextMode = sortModeIndexes[mode] === undefined ? "name" : mode;
+    state.sortMode = nextMode;
+    const selected = sortControls.find((input) => input.value === nextMode);
+    if (selected) selected.checked = true;
+    if (sortSegmented) {
+      sortSegmented.style.setProperty("--segment-index", String(sortModeIndexes[nextMode]));
+    }
+  }
+
+  setSortMode(state.sortMode);
+
   sortControls.forEach((control) => {
     control.addEventListener("change", async (event) => {
       const nextMode = event.currentTarget.value;
       const previousMode = state.sortMode;
       if (nextMode === "time") {
-        const previous = document.querySelector(`input[name='sortMode'][value='${previousMode}']`);
-        if (previous) previous.checked = true;
+        const requestGeneration = ++state.sortRequestGeneration;
+        setSortMode(previousMode);
         sortControls.forEach((input) => { input.disabled = true; });
         const failures = await ensureAllOriginals([...state.items], "按拍摄时间排序");
+        if (requestGeneration !== state.sortRequestGeneration) return;
         sortControls.forEach((input) => { input.disabled = false; });
         if (failures.length) {
+          setSortMode(previousMode);
           showNotice(`无法读取 ${failures.length} 张原图，已保留原排序`);
           render();
           renderPhotoList();
           return;
         }
-        event.currentTarget.checked = true;
+        setSortMode("time");
+      } else {
+        state.sortRequestGeneration += 1;
+        sortControls.forEach((input) => { input.disabled = false; });
+        setSortMode(nextMode);
       }
-      state.sortMode = nextMode;
       scheduleRender();
       renderPhotoList();
     });
@@ -447,6 +474,35 @@
     qualityField.style.display = !fullResolution && formatSelect.value === "image/jpeg" ? "grid" : "none";
   }
 
+  function openExportModal() {
+    if (state.isExporting) {
+      showNotice("请先完成当前导出");
+      return;
+    }
+    updateExportFormatControls();
+    const items = getSortedItems();
+    const isFullResolution = exportScale.value === "full";
+    const scale = isFullResolution
+      ? getFullResolutionScale(items)
+      : clamp(Number(exportScale.value) || 1, 1, 3);
+    if (Number.isFinite(scale) && scale > 0) {
+      const options = getRenderOptions(scale);
+      const layout = computeLayout(items.length, options);
+      exportModalSize.textContent = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} 像素`;
+    } else {
+      exportModalSize.textContent = "—";
+    }
+    exportModalStatus.textContent = "准备好后点击确认导出";
+    exportModal.hidden = false;
+    document.body.style.overflow = "hidden";
+    exportModalClose.focus();
+  }
+
+  function closeExportModal() {
+    exportModal.hidden = true;
+    document.body.style.overflow = "";
+  }
+
   exportScale.addEventListener("change", updateExportFormatControls);
   formatSelect.addEventListener("change", updateExportFormatControls);
 
@@ -464,7 +520,7 @@
 
   zoomFit.addEventListener("click", fitPreviewToViewport);
 
-  exportButton.addEventListener("click", async () => {
+  exportButton.addEventListener("click", () => {
     if (!state.items.length) return;
     if (state.isExporting) {
       if (state.exportHydrationItems) {
@@ -477,6 +533,18 @@
       }
       return;
     }
+    openExportModal();
+  });
+
+  exportModalClose.addEventListener("click", closeExportModal);
+  exportModalCancel.addEventListener("click", closeExportModal);
+  exportModal.addEventListener("click", (event) => {
+    if (event.target === exportModal || event.target.classList.contains("frame-export-backdrop")) {
+      closeExportModal();
+    }
+  });
+  exportModalConfirm.addEventListener("click", async () => {
+    closeExportModal();
     await exportIndexImage();
   });
 
@@ -661,10 +729,11 @@
   }
 
   function solidifyCustomOrder() {
-    if (getSortMode() === "custom") return;
     state.items = getSortedItems();
     reverseSort.checked = false;
-    document.querySelector("input[name='sortMode'][value='custom']").checked = true;
+    state.sortRequestGeneration += 1;
+    sortControls.forEach((input) => { input.disabled = false; });
+    setSortMode("custom");
   }
 
   function isHalfFrameMode() {
@@ -2619,6 +2688,9 @@
       if (!frameMenu.hidden) {
         event.preventDefault();
         hideFrameMenu({ restoreFocus: true });
+      } else if (!exportModal.hidden) {
+        event.preventDefault();
+        closeExportModal();
       } else if (!frameExportModal.hidden) {
         event.preventDefault();
         closeFrameExportModal();
@@ -2628,7 +2700,22 @@
       }
       return;
     }
-    if (event.key !== "Tab" || frameExportModal.hidden) return;
+    if (event.key !== "Tab") return;
+    if (!exportModal.hidden) {
+      const focusable = Array.from(exportModal.querySelectorAll("button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])"));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+      return;
+    }
+    if (frameExportModal.hidden) return;
     const focusable = Array.from(frameExportModal.querySelectorAll("button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])"));
     if (!focusable.length) return;
     const first = focusable[0];

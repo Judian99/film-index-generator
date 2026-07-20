@@ -1,0 +1,30 @@
+:root {
+  color-scheme: light;
+  --ui-ink:#17201b; --ui-page:#dce4dd; --ui-note:#efe9dc; --ui-note-ink:#27342d; --ui-line:rgba(18,35,27,.14);
+  --ui-sidebar:#f1ede2; --ui-sidebar-ink:#17201b; --ui-panel:#f8f5ec; --ui-heading:#14231c; --ui-muted:#68726c; --ui-accent:#dca33f;
+  --ui-primary:#174f3c; --ui-primary-ink:#fffaf0; --ui-focus:rgba(220,163,63,.5); --ui-well:#e7e3d9; --ui-field:#fffdf7; --ui-field-ink:#1c2822;
+  --ui-drop:#e9eee8; --ui-drop-line:#5a786a; --ui-drop-ink:#1d4938; --ui-button:#f8f5ec; --ui-counter:#eef1eb; --ui-switch-bg:#e3dfd5;
+  --ui-workspace:linear-gradient(rgba(20,54,40,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(20,54,40,.035) 1px,transparent 1px),linear-gradient(145deg,#cfdad2,#e9e4d9 62%,#c9d0c9); background-size:28px 28px,28px 28px,auto;
+  --ui-preview:#d6ded7; --ui-preview-line:rgba(18,35,27,.13); --ui-preview-radius:8px; --ui-preview-shadow:inset 0 1px rgba(255,255,255,.45);
+  --ui-sheet:#eee9dc; --ui-sheet-line:rgba(39,43,38,.17); --ui-sheet-muted:#57635c; --ui-sheet-radius:5px; --ui-sheet-shadow:0 24px 54px rgba(23,35,29,.16);
+  --ui-film:#111713; --ui-hole:#e9e4d7; --ui-edge:#dca33f; --ui-film-radius:3px; --ui-film-shadow:0 12px 24px rgba(9,14,11,.3);
+  --ui-empty:#eee9dc; --ui-empty-ink:#17201b; --ui-empty-muted:#667069; --ui-empty-rotate:-1.1deg;
+  --ui-panel-radius:6px; --ui-control-radius:5px; --ui-mark-radius:5px; --ui-mark:#142c23; --ui-mark-ink:#e4a840; --ui-mark-shadow:0 8px 18px rgba(20,44,35,.2);
+  --ui-panel-shadow:0 4px 12px rgba(27,40,33,.045); --ui-panel-blur:none; --ui-button-shadow:0 6px 13px rgba(17,55,41,.17); --ui-segment-shadow:0 3px 8px rgba(17,55,41,.12);
+  --ui-texture-opacity:.09; --ui-texture:repeating-linear-gradient(0deg,rgba(255,255,255,.5) 0 1px,transparent 1px 4px); --ui-hover-brightness:.96;
+}
+.concept-brand small { color:var(--ui-accent); font:800 8px/1 ui-monospace,monospace; letter-spacing:.12em; }
+:root[data-theme="dark"] {
+  color-scheme:dark;
+  --ui-ink:#e3ece6;--ui-page:#101814;--ui-note:#18231d;--ui-note-ink:#dce8e1;--ui-line:rgba(220,238,227,.13);
+  --ui-sidebar:#151f1a;--ui-sidebar-ink:#e0e9e3;--ui-panel:#1d2822;--ui-heading:#f0f4f1;--ui-muted:#91a097;--ui-accent:#e4ae4e;
+  --ui-primary:#2f8967;--ui-primary-ink:#f8fff9;--ui-focus:rgba(228,174,78,.48);--ui-well:#111a16;--ui-field:#131d18;--ui-field-ink:#e6eee9;
+  --ui-drop:#182720;--ui-drop-line:#568c73;--ui-drop-ink:#b5dcc9;--ui-button:#202c26;--ui-counter:#19231e;--ui-switch-bg:#101814;
+  --ui-workspace:linear-gradient(rgba(139,188,163,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(139,188,163,.035) 1px,transparent 1px),linear-gradient(145deg,#17231d,#202922 62%,#101713);
+  --ui-preview:#16221c;--ui-preview-line:rgba(210,231,218,.12);--ui-preview-shadow:inset 0 1px rgba(255,255,255,.05);
+  --ui-sheet:#252820;--ui-sheet-line:rgba(239,229,206,.14);--ui-sheet-muted:#aab2aa;--ui-sheet-shadow:0 28px 60px rgba(0,0,0,.38);
+  --ui-film:#080c0a;--ui-hole:#d8d6ca;--ui-edge:#e4ae4e;--ui-film-shadow:0 14px 30px rgba(0,0,0,.55);
+  --ui-empty:#242820;--ui-empty-ink:#eef2ed;--ui-empty-muted:#a4aca5;--ui-mark:#0d1712;--ui-mark-ink:#e4ae4e;
+  --ui-panel-shadow:0 8px 20px rgba(0,0,0,.18);--ui-button-shadow:0 7px 16px rgba(0,0,0,.24);--ui-segment-shadow:0 4px 10px rgba(0,0,0,.22);--ui-texture-opacity:.05;--ui-hover-brightness:1.12;
+}
+

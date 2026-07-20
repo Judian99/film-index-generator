@@ -1,0 +1,33 @@
+:root {
+  color-scheme: light;
+  --ui-ink:#18221c; --ui-page:#d9ddd6; --ui-note:rgba(244,239,228,.88); --ui-note-ink:#29362f; --ui-line:rgba(24,42,33,.14);
+  --ui-sidebar:#f2ede2; --ui-sidebar-ink:#17221c; --ui-panel:rgba(251,248,239,.9); --ui-heading:#15231c; --ui-muted:#6d736c; --ui-accent:#ce6849;
+  --ui-primary:#19523e; --ui-primary-ink:#fffaf0; --ui-focus:rgba(214,154,57,.48); --ui-well:#e5e2d8; --ui-field:#fffdf7; --ui-field-ink:#1d2922;
+  --ui-drop:linear-gradient(145deg,#edf1ea,#e8e3d9); --ui-drop-line:#668072; --ui-drop-ink:#20513f; --ui-button:rgba(255,253,247,.8); --ui-counter:rgba(244,242,235,.8); --ui-switch-bg:#e3dfd5;
+  --ui-workspace:radial-gradient(circle at 16% 0%,rgba(255,255,255,.6),transparent 28rem),linear-gradient(145deg,#c9d3cc,#e2ded3 58%,#c3c0b7);
+  --ui-preview:radial-gradient(ellipse at 26% 7%,rgba(255,251,235,.58),transparent 48%),linear-gradient(145deg,#aaa59a,#d0c9bc 44%,#9b958b); --ui-preview-line:rgba(255,255,255,.5); --ui-preview-radius:14px; --ui-preview-shadow:0 25px 66px rgba(45,50,45,.17),inset 0 1px rgba(255,255,255,.5);
+  --ui-sheet:rgba(244,239,226,.92); --ui-sheet-line:rgba(255,255,255,.68); --ui-sheet-muted:#5c665f; --ui-sheet-radius:9px; --ui-sheet-shadow:0 28px 66px rgba(43,42,35,.22),inset 0 1px rgba(255,255,255,.68);
+  --ui-film:#171913; --ui-hole:#eee8d9; --ui-edge:#d99c3b; --ui-film-radius:4px; --ui-film-shadow:0 18px 34px rgba(25,24,19,.34);
+  --ui-empty:rgba(243,238,225,.92); --ui-empty-ink:#17221c; --ui-empty-muted:#697069; --ui-empty-rotate:-1.25deg;
+  --ui-panel-radius:8px; --ui-control-radius:7px; --ui-mark-radius:7px; --ui-mark:#17382c; --ui-mark-ink:#e3a13d; --ui-mark-shadow:0 10px 22px rgba(22,54,42,.2);
+  --ui-panel-shadow:0 8px 22px rgba(32,45,38,.07); --ui-panel-blur:blur(8px); --ui-button-shadow:0 7px 16px rgba(22,68,51,.18); --ui-segment-shadow:0 4px 10px rgba(22,68,51,.12);
+  --ui-texture-opacity:.12; --ui-texture:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E"); --ui-hover-brightness:.97;
+}
+.concept-sidebar { box-shadow:16px 0 44px rgba(32,42,36,.07); }
+.concept-brand small { color:#d79d3c; font:800 8px/1 ui-monospace,monospace; letter-spacing:.12em; }
+.preview-heading .eyebrow { color:var(--ui-primary); }
+.preview-surface::after { content:"STUDIO LIGHT / 01"; position:absolute; right:18px; bottom:15px; color:rgba(255,255,255,.58); font:800 8px/1 ui-monospace,monospace; letter-spacing:.14em; }
+:root[data-theme="dark"] {
+  color-scheme:dark;
+  --ui-ink:#e6eee9;--ui-page:#151c18;--ui-note:rgba(34,40,35,.9);--ui-note-ink:#e8eee9;--ui-line:rgba(222,234,226,.13);
+  --ui-sidebar:#1a231e;--ui-sidebar-ink:#e8eee9;--ui-panel:rgba(31,41,35,.9);--ui-heading:#f1f5f2;--ui-muted:#99a49d;--ui-accent:#dd7b5b;
+  --ui-primary:#328466;--ui-primary-ink:#f8fff9;--ui-focus:rgba(224,164,65,.48);--ui-well:#111814;--ui-field:#151e19;--ui-field-ink:#e6ede8;
+  --ui-drop:linear-gradient(145deg,#1d2a23,#18201c);--ui-drop-line:#5d8d78;--ui-drop-ink:#b6ddcb;--ui-button:rgba(38,49,43,.88);--ui-counter:rgba(31,40,35,.88);--ui-switch-bg:#111713;
+  --ui-workspace:radial-gradient(circle at 16% 0%,rgba(157,204,177,.1),transparent 28rem),linear-gradient(145deg,#26332c,#232720 58%,#151816);
+  --ui-preview:radial-gradient(ellipse at 26% 7%,rgba(255,223,185,.12),transparent 48%),linear-gradient(145deg,#4b4942,#2c2f2b 48%,#171a18);--ui-preview-line:rgba(255,255,255,.09);--ui-preview-shadow:0 28px 70px rgba(0,0,0,.38),inset 0 1px rgba(255,255,255,.07);
+  --ui-sheet:rgba(53,50,42,.93);--ui-sheet-line:rgba(255,255,255,.1);--ui-sheet-muted:#b4b4a9;--ui-sheet-shadow:0 30px 70px rgba(0,0,0,.46),inset 0 1px rgba(255,255,255,.07);
+  --ui-film:#0b0d0a;--ui-hole:#dcd8cb;--ui-edge:#e0a448;--ui-film-shadow:0 20px 40px rgba(0,0,0,.54);
+  --ui-empty:rgba(51,49,41,.94);--ui-empty-ink:#edf2ee;--ui-empty-muted:#a9afa8;--ui-mark:#102019;--ui-mark-ink:#e2a345;
+  --ui-panel-shadow:0 10px 26px rgba(0,0,0,.22);--ui-button-shadow:0 8px 18px rgba(0,0,0,.28);--ui-segment-shadow:0 5px 12px rgba(0,0,0,.25);--ui-hover-brightness:1.12;
+}
+

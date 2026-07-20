@@ -34,7 +34,8 @@
 
           <section class="panel-section" aria-label="排序">
             <h3>排序</h3>
-            <div class="segmented segmented-3" role="radiogroup" aria-label="排序方式">
+            <div class="segmented segmented-3 sort-segmented" role="radiogroup" aria-label="排序方式">
+              <span class="segment-indicator" aria-hidden="true"></span>
               <label>
                 <input type="radio" name="sortMode" value="name" checked />
                 <span>名称</span>
@@ -52,7 +53,10 @@
               <input id="reverseSort" type="checkbox" />
               <span>倒序</span>
             </label>
-            <p class="hint">时间排序优先使用 EXIF 拍摄时间，没有时退回文件修改时间。直接在预览图上拖动某一帧、或在照片列表中拖拽，都会切换为自定义排序。</p>
+            <span class="info-icon-wrapper">
+              <span class="info-icon" aria-label="排序说明">i</span>
+              <span class="info-popup">时间排序优先使用 EXIF 拍摄时间，没有时退回文件修改时间。直接在预览图上拖动某一帧、或在照片列表中拖拽，都会切换为自定义排序。</span>
+            </span>
           </section>
 
           <details class="panel-section photo-list-section" id="photoListPanel" hidden>
@@ -67,53 +71,132 @@
           </details>
         </details>
 
-        <section class="panel" aria-label="胶片外观">
-          <h2>胶片外观</h2>
-          <label class="checkbox-row">
-            <input id="showEdgeText" type="checkbox" checked />
-            <span>模拟边字</span>
-          </label>
-          <label class="checkbox-row">
-            <input id="showSprockets" type="checkbox" checked />
-            <span>模拟齿孔</span>
-          </label>
-          <small id="sprocketsHint" class="field-hint" hidden></small>
-          <label class="checkbox-row">
-            <input id="imageInSprockets" type="checkbox" />
-            <span>成像覆盖齿孔区</span>
-          </label>
-          <label class="checkbox-row">
-            <input id="imageInEdgeText" type="checkbox" />
-            <span>成像覆盖边字区</span>
-          </label>
-          <small id="imageCoverageHint" class="field-hint" hidden></small>
-          <label class="checkbox-row">
-            <input id="showLeader" type="checkbox" checked />
-            <span>模拟片头片尾</span>
-          </label>
-          <small id="leaderHint" class="field-hint" hidden></small>
-          <label class="field stock-search-field">
-            <span>搜索胶卷型号</span>
-            <input
-              id="stockSearch"
-              type="search"
-              placeholder="名称、边字或冲洗工艺"
-              autocomplete="off"
-              spellcheck="false"
-              aria-controls="stockSelect"
-              aria-describedby="stockSearchStatus"
-            />
-          </label>
-          <p id="stockSearchStatus" class="field-hint stock-search-status" aria-live="polite"></p>
-          <label class="field">
-            <span>胶卷型号</span>
-            <select id="stockSelect"></select>
-          </label>
-        </section>
+        <details class="panel advanced-panel workflow-panel" id="appearancePanel" open>
+          <summary><h2>胶片外观与输出</h2></summary>
+
+          <section class="panel-section" aria-label="胶卷型号">
+            <h3>胶卷型号</h3>
+            <label class="field stock-search-field">
+              <span>搜索胶卷型号</span>
+              <input
+                id="stockSearch"
+                type="search"
+                placeholder="名称、边字或冲洗工艺"
+                autocomplete="off"
+                spellcheck="false"
+                aria-controls="stockSelect"
+                aria-describedby="stockSearchStatus"
+              />
+            </label>
+            <p id="stockSearchStatus" class="field-hint stock-search-status" aria-live="polite"></p>
+            <label class="field">
+              <span>胶卷型号</span>
+              <select id="stockSelect"></select>
+            </label>
+          </section>
+
+          <section class="panel-section" aria-label="输出设置">
+            <h3>输出设置</h3>
+            <label class="field">
+              <span>画幅</span>
+              <select id="frameAspect">
+                <option value="135" selected>135 全画幅 3:2</option>
+                <option value="half">半格 3:4（每行 12 张）</option>
+                <option value="66">6×6 方画幅 1:1</option>
+                <option value="645">6×4.5 中画幅（竖幅）</option>
+                <option value="67">6×7 中画幅</option>
+                <option value="69">6×9 中画幅 84×56</option>
+                <option value="wide">135 宽幅</option>
+                <option value="xpan" hidden>XPan 135 宽幅 65×24（兼容）</option>
+                <option value="135-69" hidden>135 宽幅 84×24（兼容）</option>
+                <option value="612">6×12 宽幅中画幅</option>
+                <option value="617">6×17 宽幅中画幅</option>
+              </select>
+            </label>
+            <label class="field" id="wideSpecField" hidden>
+              <span>宽幅规格</span>
+              <select id="wideSpecSelect">
+                <option value="xpan">XPan 65×24mm（每行 3 张）</option>
+                <option value="135-69">84×24mm（6×9 相机，每行 2 张）</option>
+              </select>
+            </label>
+            <div class="field" id="halfFrameModeField" hidden>
+              <span>半格输入</span>
+              <div class="segmented" role="radiogroup" aria-label="半格输入方式">
+                <label>
+                  <input type="radio" name="halfFrameMode" value="cropped" checked />
+                  <span>单张裁切</span>
+                </label>
+                <label>
+                  <input type="radio" name="halfFrameMode" value="uncropped" />
+                  <span>单张未裁切</span>
+                </label>
+              </div>
+            </div>
+            <label class="field">
+              <span>每行张数</span>
+              <select id="columnsSelect">
+                <option value="2">2 张</option>
+                <option value="3">3 张</option>
+                <option value="4">4 张</option>
+                <option value="5">5 张</option>
+                <option value="6" selected>6 张</option>
+                <option value="7">7 张</option>
+                <option value="8">8 张</option>
+              </select>
+              <small id="columnsHint" class="field-hint" hidden></small>
+            </label>
+          </section>
+
+          <section class="panel-section" aria-label="胶片外观">
+            <h3>胶片外观</h3>
+            <label class="checkbox-row">
+              <input id="showEdgeText" type="checkbox" checked />
+              <span>模拟边字</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="showSprockets" type="checkbox" checked />
+              <span>模拟齿孔</span>
+            </label>
+            <small id="sprocketsHint" class="field-hint" hidden></small>
+            <label class="checkbox-row">
+              <input id="imageInSprockets" type="checkbox" />
+              <span>成像覆盖齿孔区</span>
+            </label>
+            <label class="checkbox-row">
+              <input id="imageInEdgeText" type="checkbox" />
+              <span>成像覆盖边字区</span>
+            </label>
+            <small id="imageCoverageHint" class="field-hint" hidden></small>
+            <label class="checkbox-row">
+              <input id="showLeader" type="checkbox" checked />
+              <span>模拟片头片尾</span>
+            </label>
+            <small id="leaderHint" class="field-hint" hidden></small>
+          </section>
+
+          <section class="panel-section" aria-label="尺寸设置">
+            <h3>尺寸设置</h3>
+            <label class="field">
+              <span>尺寸基准</span>
+              <span class="info-icon-wrapper">
+                <input id="frameWidth" type="number" min="180" max="1200" step="20" value="420" />
+                <span class="info-icon" aria-label="尺寸基准说明">i</span>
+                <span class="info-popup">135 以标准 36mm 画幅为基准，宽幅长边按物理比例增长</span>
+              </span>
+            </label>
+          </section>
+
+        </details>
 
         <details class="panel advanced-panel" id="stockPanel">
           <summary><h2>自定义型号</h2></summary>
-          <p class="hint">新增或编辑胶卷型号，保存在浏览器本地。选中内置型号时可另存为自定义型号后修改。</p>
+          <p class="hint">
+            <span class="info-icon-wrapper">
+              <span class="info-icon" aria-label="说明">i</span>
+              <span class="info-popup">新增或编辑胶卷型号，保存在浏览器本地。选中内置型号时可另存为自定义型号后修改。</span>
+            </span>
+          </p>
           <label class="field">
             <span>名称</span>
             <input id="stockName" type="text" placeholder="如 Kodak Vision3 250D" maxlength="60" />
@@ -165,89 +248,15 @@
           </div>
         </details>
 
-        <details class="panel advanced-panel workflow-panel" id="outputPanel">
-          <summary><h2>输出</h2></summary>
-          <label class="field">
-            <span>画幅</span>
-            <select id="frameAspect">
-              <option value="135" selected>135 全画幅 3:2</option>
-              <option value="half">半格 3:4（每行 12 张）</option>
-              <option value="66">6×6 方画幅 1:1</option>
-              <option value="645">6×4.5 中画幅（竖幅）</option>
-              <option value="67">6×7 中画幅</option>
-              <option value="69">6×9 中画幅 84×56</option>
-              <option value="wide">135 宽幅</option>
-              <option value="xpan" hidden>XPan 135 宽幅 65×24（兼容）</option>
-              <option value="135-69" hidden>135 宽幅 84×24（兼容）</option>
-              <option value="612">6×12 宽幅中画幅</option>
-              <option value="617">6×17 宽幅中画幅</option>
-            </select>
-          </label>
-          <label class="field" id="wideSpecField" hidden>
-            <span>宽幅规格</span>
-            <select id="wideSpecSelect">
-              <option value="xpan">XPan 65×24mm（每行 3 张）</option>
-              <option value="135-69">84×24mm（6×9 相机，每行 2 张）</option>
-            </select>
-          </label>
-          <div class="field" id="halfFrameModeField" hidden>
-            <span>半格输入</span>
-            <div class="segmented" role="radiogroup" aria-label="半格输入方式">
-              <label>
-                <input type="radio" name="halfFrameMode" value="cropped" checked />
-                <span>单张裁切</span>
-              </label>
-              <label>
-                <input type="radio" name="halfFrameMode" value="uncropped" />
-                <span>单张未裁切</span>
-              </label>
-            </div>
-          </div>
-          <label class="field">
-            <span>每行张数</span>
-            <select id="columnsSelect">
-              <option value="2">2 张</option>
-              <option value="3">3 张</option>
-              <option value="4">4 张</option>
-              <option value="5">5 张</option>
-              <option value="6" selected>6 张</option>
-              <option value="7">7 张</option>
-              <option value="8">8 张</option>
-            </select>
-            <small id="columnsHint" class="field-hint" hidden></small>
-          </label>
-          <label class="field">
-            <span>尺寸基准</span>
-            <input id="frameWidth" type="number" min="180" max="1200" step="20" value="420" />
-            <small class="field-hint">135 以标准 36mm 画幅为基准，宽幅长边按物理比例增长</small>
-          </label>
-          <label class="field">
-            <span>输出质量</span>
-            <select id="exportScale">
-              <option value="1">标准 1x</option>
-              <option value="2" selected>精细 2x</option>
-              <option value="3">超精细 3x</option>
-              <option value="full">原图级</option>
-            </select>
-            <small class="field-hint">原图级仅支持 PNG；超出浏览器画布上限时，会流式拼接为一张完整 PNG</small>
-          </label>
-          <label class="field">
-            <span>格式</span>
-            <select id="formatSelect">
-              <option value="image/png">PNG</option>
-              <option value="image/jpeg">JPG</option>
-            </select>
-          </label>
-          <label class="field" id="qualityField">
-            <span>JPG 质量</span>
-            <input id="jpgQuality" type="range" min="70" max="100" value="92" />
-          </label>
-          <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
-        </details>
 
         <details class="panel advanced-panel" id="advancedPanel">
           <summary><h2>高级设置</h2></summary>
-          <p class="hint">微调齿孔与边字的渲染比例，实时作用于预览和导出。</p>
+          <p class="hint">
+            <span class="info-icon-wrapper">
+              <span class="info-icon" aria-label="说明">i</span>
+              <span class="info-popup">微调齿孔与边字的渲染比例，实时作用于预览和导出。</span>
+            </span>
+          </p>
           <div id="tuneFields"></div>
         </details>
 
@@ -278,6 +287,7 @@
             </label>
             <button id="zoomIn" class="icon-button" type="button" aria-label="放大预览">+</button>
             <button id="zoomFit" class="text-button" type="button">适合</button>
+            <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
             <div class="counter" id="imageCounter">0 张</div>
           </div>
         </div>
@@ -429,6 +439,56 @@
         <div class="frame-export-footer">
           <button type="button" class="text-button" id="frameExportCancel">取消</button>
           <button type="button" class="primary-button" id="frameExportApply">导出单帧</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导出索引图弹窗 -->
+    <div class="frame-export-modal" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle" hidden>
+      <div class="frame-export-backdrop"></div>
+      <div class="frame-export-container" tabindex="-1">
+        <div class="frame-export-header">
+          <div>
+            <h3 id="exportModalTitle">导出索引图</h3>
+            <p id="exportModalMeta">配置输出质量与格式后导出</p>
+          </div>
+          <button type="button" class="frame-export-close" id="exportModalClose" aria-label="关闭">×</button>
+        </div>
+        <div class="frame-export-body">
+          <div class="frame-export-controls">
+            <label class="field">
+              <span>输出质量</span>
+              <select id="exportScale">
+                <option value="1">标准 1x</option>
+                <option value="2" selected>精细 2x</option>
+                <option value="3">超精细 3x</option>
+                <option value="full">原图级</option>
+              </select>
+              <span class="info-icon-wrapper">
+                <span class="info-icon" aria-label="输出质量说明">i</span>
+                <span class="info-popup">原图级仅支持 PNG；超出浏览器画布上限时，会流式拼接为一张完整 PNG</span>
+              </span>
+            </label>
+            <label class="field">
+              <span>格式</span>
+              <select id="formatSelect">
+                <option value="image/png">PNG</option>
+                <option value="image/jpeg">JPG</option>
+              </select>
+            </label>
+            <label class="field" id="qualityField">
+              <span>JPG 质量</span>
+              <input id="jpgQuality" type="range" min="70" max="100" value="92" />
+            </label>
+          </div>
+          <div class="frame-export-info">
+            <strong id="exportModalSize">—</strong>
+            <p id="exportModalStatus" role="status" aria-live="polite">准备好后点击确认导出</p>
+          </div>
+        </div>
+        <div class="frame-export-footer">
+          <button type="button" class="text-button" id="exportModalCancel">取消</button>
+          <button type="button" class="primary-button" id="exportModalConfirm">确认导出</button>
         </div>
       </div>
     </div>

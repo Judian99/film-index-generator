@@ -124,11 +124,38 @@ h3 { margin: 7px 0 0; font-size: 21px; letter-spacing: -.02em; }
   outline: none;
   cursor: grab;
   touch-action: none;
-  background: linear-gradient(145deg, #cbc5b8, #e3ded3);
+  isolation: isolate;
+  border-top: 1px solid rgba(255,255,255,.62);
+  border-bottom: 1px solid rgba(65,55,43,.16);
+  background:
+    radial-gradient(ellipse at 23% 8%, rgba(255,251,235,.68), transparent 48%),
+    radial-gradient(ellipse at 88% 78%, rgba(169,143,108,.18), transparent 52%),
+    linear-gradient(145deg, #aaa295 0%, #d2ccbf 38%, #bbb3a6 72%, #989083 100%);
+  box-shadow:
+    inset 0 1px rgba(255,255,255,.52),
+    inset 0 -20px 46px rgba(67,56,43,.08),
+    inset 22px 0 54px rgba(255,255,255,.05);
 }
-.canvas-stage::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 70px rgba(74,65,51,.12); }
+.canvas-stage::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  opacity: .17;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.58' numOctaves='3' seed='8' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E");
+  mix-blend-mode: soft-light;
+}
+.canvas-stage::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 50px rgba(64,53,41,.075), inset 0 0 1px rgba(255,255,255,.72);
+}
 .canvas-stage:active { cursor: grabbing; }
-.canvas-stage canvas { display: block; width: 100%; height: auto; max-height: 580px; }
+.canvas-stage canvas { position: relative; z-index: 0; display: block; width: 100%; height: auto; max-height: 580px; filter: saturate(1.025) contrast(1.015); }
 .drag-hint { position: absolute; right: 13px; bottom: 12px; z-index: 2; padding: 6px 9px; border-radius: 999px; color: rgba(46,42,36,.64); background: rgba(250,248,242,.6); backdrop-filter: blur(6px); font-size: 10px; pointer-events: none; }
 .style-card figcaption { padding: 22px; }
 .card-title-row { justify-content: space-between; align-items: flex-start; gap: 10px; }

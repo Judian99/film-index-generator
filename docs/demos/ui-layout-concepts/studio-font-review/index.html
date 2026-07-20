@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>暖灰玻璃摄影棚 · 字体方案评审</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="review-page">
+    <header class="review-hero">
+      <div><p class="eyebrow">Haidai Film · Typography Review</p><h1>暖灰玻璃摄影棚<br />字体方案评审</h1><p class="hero-copy">四个版本保持布局、字号、颜色、控件和内容完全一致，仅改变标题、正文与胶片元数据字体。排序滑块、滚动条和设置顺序均为后续主应用的共享设计。</p></div>
+      <div class="hero-actions"><a href="../">返回 UI 方案总览</a><span>系统字体 · 离线可用</span></div>
+    </header>
+
+    <section class="interaction-lab" aria-labelledby="labTitle">
+      <div><p class="section-kicker">Interaction Baseline</p><h2 id="labTitle">共享交互验证</h2><p>选择排序、模拟 EXIF 读取或拖拽照片，观察选中滑块是否始终跟随程序化状态。</p></div>
+      <div class="lab-controls">
+        <div class="sort-segmented" data-sort-group style="--segment-index:0" role="radiogroup" aria-label="排序方式">
+          <span class="segment-indicator" aria-hidden="true"></span>
+          <label><input type="radio" name="review-sort" value="name" checked /><span>名称</span></label>
+          <label><input type="radio" name="review-sort" value="time" /><span>时间</span></label>
+          <label><input type="radio" name="review-sort" value="custom" /><span>自定义</span></label>
+        </div>
+        <div class="lab-actions"><button type="button" data-async-sort>模拟读取 EXIF</button><button type="button" data-program-sort>程序化循环</button><button type="button" data-reset>复位</button></div>
+        <div class="drag-list" data-drag-list aria-label="可拖拽照片顺序">
+          <button type="button" draggable="true" data-drag-item="01">01</button><button type="button" draggable="true" data-drag-item="02">02</button><button type="button" draggable="true" data-drag-item="03">03</button><button type="button" draggable="true" data-drag-item="04">04</button><button type="button" draggable="true" data-drag-item="05">05</button><button type="button" draggable="true" data-drag-item="06">06</button>
+        </div>
+        <p class="lab-status" data-status role="status" aria-live="polite">当前按名称排序。</p>
+      </div>
+    </section>
+
+    <section class="font-grid" aria-label="字体方案对比">
+      <article class="font-card font-modern" data-font-card="modern">
+        <header class="font-card-head"><div><span class="font-index">FONT 01</span><h2>现代摄影工具</h2><p>清晰、现代，与暖灰玻璃界面最自然。</p></div><code>Segoe UI / YaHei UI / Cascadia Mono</code></header>
+        <div class="app-preview" data-card-preview></div>
+      </article>
+      <article class="font-card font-editorial" data-font-card="editorial">
+        <header class="font-card-head"><div><span class="font-index">FONT 02</span><h2>画册编辑风</h2><p>标题具备摄影图录气质，正文保留无衬线效率。</p></div><code>Georgia / Songti SC / Consolas</code></header>
+        <div class="app-preview" data-card-preview></div>
+      </article>
+      <article class="font-card font-technical" data-font-card="technical">
+        <header class="font-card-head"><div><span class="font-index">FONT 03</span><h2>技术手册风</h2><p>参数层级清楚，长时间操作可读性优先。</p></div><code>Segoe UI / YaHei UI / Consolas</code></header>
+        <div class="app-preview" data-card-preview></div>
+      </article>
+      <article class="font-card font-archive" data-font-card="archive">
+        <header class="font-card-head"><div><span class="font-index">FONT 04</span><h2>胶片档案风</h2><p>更有人文与复古感，强化底片记录的身份。</p></div><code>Trebuchet / YaHei / Courier New</code></header>
+        <div class="app-preview" data-card-preview></div>
+      </article>
+    </section>
+
+    <aside class="review-note"><strong>比较建议</strong><span>重点观察 10–12px 中文标签、文件名、135 / 6×7 / C-41 等混排信息，以及标题是否抢过胶片预览本身。</span></aside>
+  </main>
+
+  <template id="appPreviewTemplate">
+    <section class="mock-app">
+      <aside class="mock-sidebar review-scrollbar">
+        <div class="mock-brand"><span class="mock-mark">H</span><div><h3>海带索引图 <b>FILM</b></h3><p>整理扫描底片，生成可编辑、可导出的胶片索引图。</p></div></div>
+        <details class="mock-panel" open><summary><span>01</span>导入与整理</summary><div class="mock-panel-body">
+          <button class="mock-drop" type="button"><i>＋</i><strong>选择或拖入扫描件</strong><small>JPG / PNG / WebP · 仅本地处理</small></button>
+          <section class="mock-section"><h4>排序</h4><div class="mock-segments"><span class="is-selected">名称</span><span>时间</span><span>自定义</span></div></section>
+          <section class="mock-section"><h4>照片列表 · 12 张</h4><div class="mock-photo"><i></i><span><strong>IMG_20260720_0036.JPG</strong><small>6048 × 4024 · 14:32</small></span><b>⠿</b></div><div class="mock-photo second"><i></i><span><strong>PORTRA400_0037.JPG</strong><small>6048 × 4024 · 14:34</small></span><b>⠿</b></div></section>
+        </div></details>
+        <details class="mock-panel" open><summary><span>02</span>胶片外观与输出</summary><div class="mock-panel-body">
+          <label class="mock-field"><span>胶卷型号</span><span class="mock-select">Kodak Portra 400<i></i></span></label>
+          <div class="mock-field-pair"><label class="mock-field"><span>画幅</span><span class="mock-select">135 全画幅 3:2<i></i></span></label><label class="mock-field"><span>每行张数</span><span class="mock-select">6 张<i></i></span></label></div>
+          <section class="mock-section appearance-options"><h4>胶片外观</h4><div class="mock-checks"><span class="checked">模拟边字</span><span class="checked">模拟齿孔</span><span>覆盖齿孔区</span><span>覆盖边字区</span><span class="checked">片头片尾</span></div></section>
+          <label class="mock-field"><span>尺寸基准</span><span class="mock-input">420 px</span></label>
+        </div></details>
+        <details class="mock-panel"><summary><span>03</span>自定义型号</summary></details><details class="mock-panel"><summary><span>04</span>高级设置</summary></details>
+      </aside>
+      <section class="mock-workspace">
+        <header class="mock-topbar"><div><span class="mock-eyebrow">Preview · Contact Sheet</span><h3>2 行 · 135 全画幅 · Kodak Portra 400</h3></div><div class="mock-tools"><span>−</span><span class="mock-zoom">85%　━━━━●━━</span><span>＋</span><b>导出索引图</b></div></header>
+        <div class="mock-stage review-scrollbar"><div class="mock-sheet"><header><span>HAIDAI FILM STUDIO / ROLL 001</span><span>2026.07.20 · 12 FRAMES</span></header><div class="film-strip"><i class="holes top"></i><span class="edge-text">KODAK PORTRA 400 · SAFETY FILM · C-41 · 01</span><div class="frames"><i></i><i></i><i></i><i></i><i></i><i></i></div><i class="holes bottom"></i></div><div class="film-strip"><i class="holes top"></i><span class="edge-text">KODAK PORTRA 400 · SAFETY FILM · C-41 · 07</span><div class="frames"><i></i><i></i><i></i><i></i><i></i><i></i></div><i class="holes bottom"></i></div></div></div>
+      </section>
+    </section>
+  </template>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>胶片档案编辑台 · 海带索引图 UI Demo</title>
+  <script src="../shared/theme-init.js"></script>
+  <link rel="stylesheet" href="../shared/base.css" />
+  <link rel="stylesheet" href="./theme.css" />
+</head>
+<body>
+  <header class="demo-note">
+    <p><a href="../">← 返回五方案总览</a>　当前方案：<strong data-concept-name>胶片档案编辑台</strong></p>
+    <div class="demo-actions">
+      <div class="demo-switch" role="group" aria-label="预览状态">
+        <button type="button" data-demo-state="empty" aria-pressed="false">空状态</button>
+        <button type="button" data-demo-state="working" aria-pressed="true">已导入 12 张</button>
+      </div>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="切换到夜间模式"><span data-theme-icon aria-hidden="true">☾</span><span data-theme-label>夜间</span></button>
+    </div>
+  </header>
+  <main class="concept-app" data-state="working">
+    <aside class="concept-sidebar" aria-label="索引图设置示例">
+      <div class="concept-brand"><div class="concept-mark" aria-hidden="true"></div><div><h1>海带索引图 <small>FILM</small></h1><p>整理扫描底片，生成可编辑、可导出的胶片索引图。</p></div></div>
+
+      <details class="concept-panel" open><summary><span class="panel-index">01</span>导入与整理</summary><div class="panel-body">
+        <button class="demo-drop" type="button" data-fake-import><span class="drop-plus">+</span><strong>选择或拖入扫描件</strong><small>JPG / PNG / WebP · 仅本地处理</small></button>
+        <section class="panel-section"><h2>排序</h2><div class="segmented"><label><input type="radio" name="demo-sort" checked><span>名称</span></label><label><input type="radio" name="demo-sort"><span>时间</span></label><label><input type="radio" name="demo-sort"><span>自定义</span></label></div></section>
+        <section class="panel-section"><h2>照片列表 · 12 张</h2><div class="photo-list"><div class="photo-row"><span class="photo-thumb"></span><span class="photo-meta"><strong>IMG_0012.jpg</strong><small>6048 × 4024</small></span><span class="photo-grip" aria-hidden="true">⠿</span></div><div class="photo-row"><span class="photo-thumb"></span><span class="photo-meta"><strong>IMG_0013.jpg</strong><small>6048 × 4024</small></span><span class="photo-grip" aria-hidden="true">⠿</span></div></div></section>
+      </div></details>
+
+      <details class="concept-panel" open><summary><span class="panel-index">02</span>胶片外观与输出</summary><div class="panel-body">
+        <section class="panel-section"><h2>胶片外观</h2><div class="check-grid"><label class="check-row"><input type="checkbox" checked>模拟边字</label><label class="check-row"><input type="checkbox" checked>模拟齿孔</label><label class="check-row"><input type="checkbox">覆盖齿孔区</label><label class="check-row"><input type="checkbox" checked>片头片尾</label></div></section>
+        <label class="field"><span>胶卷型号</span><span class="select-wrap"><select><option>Kodak Portra 400</option><option>Fujifilm 200</option></select></span></label>
+        <div class="two-fields"><label class="field"><span>画幅</span><span class="select-wrap"><select><option>135 全画幅 3:2</option></select></span></label><label class="field"><span>每行张数</span><span class="select-wrap"><select><option>6 张</option></select></span></label></div>
+      </div></details>
+
+      <details class="concept-panel"><summary><span class="panel-index">03</span>自定义型号</summary><div class="panel-body"><label class="field"><span>名称</span><input type="text" value="Kodak Vision3 250D"></label><label class="field"><span>冲洗工艺</span><span class="select-wrap"><select><option>ECN-2 电影卷</option></select></span></label></div></details>
+      <details class="concept-panel"><summary><span class="panel-index">04</span>高级设置</summary><div class="panel-body"><label class="field"><span>齿孔宽度</span><input type="range" value="50"></label><label class="field"><span>边字间距</span><input type="range" value="42"></label></div></details>
+    </aside>
+
+    <section class="concept-workspace" aria-label="预览示例">
+      <div class="concept-topbar"><div class="preview-heading"><p class="eyebrow">Preview · Contact Sheet</p><h2>2 行 · 135 全画幅 · Kodak Portra 400</h2></div><div class="preview-tools"><div class="zoom-group"><button class="icon-button" type="button" data-zoom-step="-10" aria-label="缩小">−</button><label class="zoom-field"><span data-zoom-value>85%</span><input type="range" min="55" max="110" value="85" data-zoom-range aria-label="缩放"></label><button class="icon-button" type="button" data-zoom-step="10" aria-label="放大">+</button><button class="secondary-button" type="button" data-fit>适合</button></div><div class="output-group"><button class="primary-button" type="button" data-export>导出索引图</button><span class="demo-counter">12 张</span></div></div></div>
+      <div class="preview-surface">
+        <section class="empty-composition"><div class="empty-meta"><span>HDF / CONTACT 001</span><span>135 · 36 EXP</span></div><div class="empty-film" aria-hidden="true"><span class="sprockets top"></span><span class="sprockets bottom"></span><div class="empty-frames"><i style="--i:1"></i><i style="--i:2"></i><i style="--i:3"></i><i style="--i:4"></i><i style="--i:5"></i></div></div><div class="empty-copy"><span class="status-light"></span><div><h3>装入你的底片扫描件</h3><p>图片只在浏览器本地整理，生成一张可导出的胶片索引图。</p></div><button class="primary-button" type="button" data-fake-import>选择扫描件</button></div></section>
+        <section class="contact-sheet"><div class="sheet-head"><span>FILM ARCHIVE / FILE 001</span><span>2026.07.20 · 12 FRAMES</span></div><div class="film-row"><span class="sprockets top"></span><span class="edge-copy">KODAK PORTRA 400 · SAFETY FILM · C-41 · 01</span><div class="frame-grid"><i class="frame" data-n="01"></i><i class="frame" data-n="02"></i><i class="frame" data-n="03"></i><i class="frame" data-n="04"></i><i class="frame" data-n="05"></i><i class="frame" data-n="06"></i></div><span class="sprockets bottom"></span></div><div class="film-row"><span class="sprockets top"></span><span class="edge-copy">KODAK PORTRA 400 · SAFETY FILM · C-41 · 07</span><div class="frame-grid"><i class="frame" data-n="07"></i><i class="frame" data-n="08"></i><i class="frame" data-n="09"></i><i class="frame" data-n="10"></i><i class="frame" data-n="11"></i><i class="frame" data-n="12"></i></div><span class="sprockets bottom"></span></div></section>
+      </div>
+    </section>
+  </main>
+  <div class="demo-toast" data-demo-toast role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  <script src="../shared/demo.js"></script>
+</body>
+</html>

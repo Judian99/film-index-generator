@@ -1,0 +1,32 @@
+:root {
+  color-scheme: light;
+  --ui-ink:#211f1a; --ui-page:#d7d1c5; --ui-note:rgba(255,254,249,.72); --ui-note-ink:#413d35; --ui-line:rgba(61,56,47,.15);
+  --ui-sidebar:linear-gradient(160deg,rgba(255,254,249,.82),rgba(243,238,228,.68)); --ui-sidebar-ink:#27231e; --ui-panel:rgba(255,254,249,.68); --ui-heading:#28241f; --ui-muted:#777166; --ui-accent:#c75f41;
+  --ui-primary:#2c2924; --ui-primary-ink:#fff8ef; --ui-focus:rgba(23,111,119,.42); --ui-well:rgba(255,255,255,.34); --ui-field:rgba(255,255,255,.62); --ui-field-ink:#2a2722;
+  --ui-drop:rgba(255,252,245,.45); --ui-drop-line:#bd765f; --ui-drop-ink:#7e3c29; --ui-button:rgba(255,255,255,.52); --ui-counter:rgba(255,255,255,.44); --ui-switch-bg:rgba(255,255,255,.35);
+  --ui-workspace:radial-gradient(circle at 16% 2%,rgba(255,255,255,.65),transparent 31rem),linear-gradient(145deg,#c8c1b5,#ddd7cb 58%,#bcb4a8);
+  --ui-preview:radial-gradient(ellipse at 23% 8%,rgba(255,251,235,.68),transparent 48%),radial-gradient(ellipse at 88% 78%,rgba(169,143,108,.18),transparent 52%),linear-gradient(145deg,#9f978b,#ccc5b8 38%,#b4ac9f 72%,#8f877c); --ui-preview-line:rgba(255,255,255,.6); --ui-preview-radius:24px; --ui-preview-shadow:0 24px 64px rgba(61,51,40,.16),inset 0 1px rgba(255,255,255,.55);
+  --ui-sheet:rgba(252,249,240,.82); --ui-sheet-line:rgba(255,255,255,.76); --ui-sheet-muted:#716c62; --ui-sheet-radius:18px; --ui-sheet-shadow:0 28px 68px rgba(54,45,34,.22),inset 0 1px rgba(255,255,255,.8);
+  --ui-film:#241c17; --ui-hole:#eee6d7; --ui-edge:#e28a57; --ui-film-radius:7px; --ui-film-shadow:0 18px 35px rgba(39,29,22,.34);
+  --ui-empty:rgba(250,247,238,.79); --ui-empty-ink:#28241f; --ui-empty-muted:#777166; --ui-empty-rotate:-1.8deg;
+  --ui-panel-radius:18px; --ui-control-radius:11px; --ui-mark-radius:12px; --ui-mark:#2c2924; --ui-mark-ink:#ff9875; --ui-mark-shadow:0 12px 24px rgba(44,41,36,.2);
+  --ui-panel-shadow:0 18px 48px rgba(58,50,39,.1),inset 0 1px rgba(255,255,255,.72); --ui-panel-blur:blur(15px); --ui-button-shadow:0 8px 18px rgba(35,31,26,.18); --ui-segment-shadow:0 6px 14px rgba(35,31,26,.14);
+  --ui-texture-opacity:.16; --ui-texture:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.58' numOctaves='3' seed='8'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E"); --ui-hover-brightness:1.03;
+}
+.concept-sidebar { box-shadow:20px 0 50px rgba(52,44,35,.08); }
+.concept-brand h1 { font-family:Georgia,"Noto Serif SC",serif; font-weight:600; }
+.concept-brand small { color:var(--ui-accent); font:800 8px/1 ui-monospace,monospace; letter-spacing:.12em; }
+:root[data-theme="dark"] {
+  color-scheme:dark;
+  --ui-ink:#f0e9df;--ui-page:#211e1b;--ui-note:rgba(42,37,33,.82);--ui-note-ink:#eee5d9;--ui-line:rgba(241,226,209,.13);
+  --ui-sidebar:linear-gradient(160deg,rgba(49,43,38,.92),rgba(31,28,25,.86));--ui-sidebar-ink:#f1e9df;--ui-panel:rgba(54,48,43,.7);--ui-heading:#fff6eb;--ui-muted:#aaa096;--ui-accent:#e27b5c;
+  --ui-primary:#e9dfd2;--ui-primary-ink:#28231f;--ui-focus:rgba(75,172,178,.48);--ui-well:rgba(12,11,10,.3);--ui-field:rgba(24,22,20,.68);--ui-field-ink:#eee6dc;
+  --ui-drop:rgba(37,33,29,.68);--ui-drop-line:#c97b62;--ui-drop-ink:#f1b39e;--ui-button:rgba(64,57,51,.75);--ui-counter:rgba(48,43,39,.72);--ui-switch-bg:rgba(19,17,15,.5);
+  --ui-workspace:radial-gradient(circle at 18% 0%,rgba(255,206,168,.09),transparent 30rem),linear-gradient(145deg,#3b3530,#262320 58%,#171614);
+  --ui-preview:radial-gradient(ellipse at 25% 8%,rgba(255,212,177,.13),transparent 48%),linear-gradient(145deg,#504941,#2e2a26 48%,#171614);--ui-preview-line:rgba(255,255,255,.09);--ui-preview-shadow:0 28px 70px rgba(0,0,0,.35),inset 0 1px rgba(255,255,255,.08);
+  --ui-sheet:rgba(55,49,43,.91);--ui-sheet-line:rgba(255,255,255,.11);--ui-sheet-muted:#b6aca1;--ui-sheet-shadow:0 30px 72px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.08);
+  --ui-film:#130f0d;--ui-hole:#dcd5ca;--ui-edge:#e58b63;--ui-film-shadow:0 20px 40px rgba(0,0,0,.56);
+  --ui-empty:rgba(53,48,42,.94);--ui-empty-ink:#f4ece1;--ui-empty-muted:#b0a69b;--ui-mark:#171411;--ui-mark-ink:#f08e6b;
+  --ui-panel-shadow:0 20px 54px rgba(0,0,0,.25),inset 0 1px rgba(255,255,255,.08);--ui-button-shadow:0 9px 20px rgba(0,0,0,.3);--ui-segment-shadow:0 7px 16px rgba(0,0,0,.28);--ui-hover-brightness:1.12;
+}
+
