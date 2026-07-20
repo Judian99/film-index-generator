@@ -1475,20 +1475,41 @@
     }
   }
 
-  function applyPngSubFilter(scanlines, width, height) {
-    const rowStride = width * 3 + 1;
+  function applyPngPaethFilter(scanlines, width, height, previousRow = null) {
     const pixelBytes = width * 3;
+    const rowStride = pixelBytes + 1;
+    let prior = previousRow || new Uint8Array(pixelBytes);
+    let current = new Uint8Array(pixelBytes);
+
     for (let y = 0; y < height; y += 1) {
       const rowStart = y * rowStride;
-      scanlines[rowStart] = 1;
-      for (let offset = pixelBytes; offset > 3; offset -= 1) {
-        const index = rowStart + offset;
-        scanlines[index] = (scanlines[index] - scanlines[index - 3]) & 0xff;
+      current.set(scanlines.subarray(rowStart + 1, rowStart + rowStride));
+      scanlines[rowStart] = 4;
+      for (let x = 0; x < pixelBytes; x += 1) {
+        const left = x >= 3 ? current[x - 3] : 0;
+        const up = prior[x];
+        const upLeft = x >= 3 ? prior[x - 3] : 0;
+        scanlines[rowStart + 1 + x] =
+          (current[x] - getPngPaethPredictor(left, up, upLeft)) & 0xff;
       }
+      const swap = prior;
+      prior = current;
+      current = swap;
     }
+
+    return prior;
   }
 
-  async function renderPngBand(items, options, layout, bandY, bandHeight) {
+  function getPngPaethPredictor(left, up, upLeft) {
+    const prediction = left + up - upLeft;
+    const leftDistance = Math.abs(prediction - left);
+    const upDistance = Math.abs(prediction - up);
+    const upLeftDistance = Math.abs(prediction - upLeft);
+    if (leftDistance <= upDistance && leftDistance <= upLeftDistance) return left;
+    return upDistance <= upLeftDistance ? up : upLeft;
+  }
+
+  async function renderPngBandRaw(items, options, layout, bandY, bandHeight) {
     const rowBytes = layout.canvasW * 3 + 1;
     const scanlines = new Uint8Array(rowBytes * bandHeight);
     const previousCanvas = activeCanvas;
@@ -1512,7 +1533,6 @@
         canvas.height = 1;
       }
     }
-    applyPngSubFilter(scanlines, layout.canvasW, bandHeight);
     return scanlines;
   }
 
@@ -1533,6 +1553,7 @@
     const reader = compression.readable.getReader();
     const pngParts = [PNG_SIGNATURE, createPngHeader(layout.canvasW, layout.canvasH)];
     let pngBytes = PNG_SIGNATURE.byteLength + 25;
+    let previousRow = null;
     const consumeCompressed = (async () => {
       while (true) {
         if (state.exportCancelled) throw new DOMException("Export cancelled", "AbortError");
@@ -1552,8 +1573,9 @@
         const bandHeight = getPngBandHeight(layout.canvasW, layout.canvasH - y);
         const percent = Math.floor((y / layout.canvasH) * 100);
         exportButton.textContent = `取消导出（${percent}%）`;
-        statusTitle.textContent = `正在拼接原图级 PNG ${percent}%`;
-        const scanlines = await renderPngBand(items, options, layout, y, bandHeight);
+        statusTitle.textContent = `正在无损压缩原图级 PNG ${percent}%`;
+        const scanlines = await renderPngBandRaw(items, options, layout, y, bandHeight);
+        previousRow = applyPngPaethFilter(scanlines, layout.canvasW, bandHeight, previousRow);
         await writer.write(scanlines);
         y += bandHeight;
         await new Promise((resolve) => window.setTimeout(resolve, 0));
