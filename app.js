@@ -121,6 +121,7 @@
     // 帧操作菜单与裁切工具
     contextItemId: null,
     cropState: null,
+    cropRequestGeneration: 0,
     frameExportState: null,
     reprocessGeneration: 0,
     manual135Columns: Number(columnsSelect.value) || 6,
@@ -900,6 +901,7 @@
       manualTurns: 0,
       autoTurns: 0,
       editVersion: 0,
+      sourceGeneration: 0,
       source: originalSource,
       width: originalSource.width,
       height: originalSource.height,
@@ -909,7 +911,7 @@
       thumbUrl: URL.createObjectURL(file),
       ownsThumbUrl: true,
     };
-    await rebuildItemSource(item, state.reprocessGeneration, item.editVersion);
+    await rebuildItemSource(item, item.editVersion);
     return item;
   }
 
@@ -928,6 +930,7 @@
       manualTurns: 0,
       autoTurns: 0,
       editVersion: 0,
+      sourceGeneration: 0,
       source: originalSource,
       width: originalSource.width,
       height: originalSource.height,
@@ -944,7 +947,7 @@
         revision: 0,
       },
     };
-    await rebuildItemSource(item, state.reprocessGeneration, item.editVersion);
+    await rebuildItemSource(item, item.editVersion);
     return item;
   }
 
@@ -1026,8 +1029,7 @@
           };
           let rebuilt = false;
           while (!rebuilt && !controller.signal.aborted) {
-            const generation = ++state.reprocessGeneration;
-            rebuilt = await rebuildItemSource(candidate, generation, candidate.editVersion);
+            rebuilt = await rebuildItemSource(candidate, candidate.editVersion);
           }
           if (
             !rebuilt ||
@@ -1144,24 +1146,50 @@
     return canvasToSource(canvas);
   }
 
-  function targetPortraitMode() {
+  function getCurrentInputAdapter() {
     const format = getFormat();
     const formatId = isHalfFrameMode() ? "half" : format.id || frameAspect.value;
-    return FilmFrame.getInputAdapter(formatId, getHalfFrameInputMode()).targetPortrait;
+    return FilmFrame.getInputAdapter(formatId, getHalfFrameInputMode());
   }
 
-  async function rebuildItemSource(item, generation, editVersion) {
+  function targetPortraitMode() {
+    return getCurrentInputAdapter().targetPortrait;
+  }
+
+  function getAutoTurnsForSource(source) {
+    const portrait = targetPortraitMode();
+    const matches = portrait ? source.height >= source.width : source.width >= source.height;
+    return matches ? 0 : 1;
+  }
+
+  function mapRotatedCropToSource(x, y, width, height, sourceWidth, sourceHeight, turns) {
+    switch (turns % 4) {
+      case 1:
+        return { x: y, y: sourceHeight - x - width, width: height, height: width };
+      case 2:
+        return {
+          x: sourceWidth - x - width,
+          y: sourceHeight - y - height,
+          width,
+          height,
+        };
+      case 3:
+        return { x: sourceWidth - y - height, y: x, width: height, height: width };
+      default:
+        return { x, y, width, height };
+    }
+  }
+
+  async function rebuildItemSource(item, editVersion) {
+    const sourceGeneration = ++item.sourceGeneration;
     const base = item.editSource || item.originalSource;
     let candidate = base;
     const derived = [];
-    let autoTurns = 0;
-    const portrait = targetPortraitMode();
-    const matches = portrait ? base.height >= base.width : base.width >= base.height;
+    const autoTurns = getAutoTurnsForSource(base);
 
-    if (!matches) {
+    if (autoTurns) {
       candidate = await rotateSourceClockwise(candidate);
       derived.push(candidate);
-      autoTurns = 1;
     }
 
     for (let turn = 0; turn < item.manualTurns; turn += 1) {
@@ -1171,7 +1199,9 @@
       derived.push(candidate);
     }
 
-    const current = generation === state.reprocessGeneration && editVersion === item.editVersion;
+    const current =
+      sourceGeneration === item.sourceGeneration &&
+      editVersion === item.editVersion;
     if (!current) {
       if (candidate !== base) closeSource(candidate);
       return false;
@@ -1193,7 +1223,7 @@
     previewWrap.classList.add("is-loading");
     exportButton.disabled = true;
     const items = [...state.items];
-    await Promise.all(items.map((item) => rebuildItemSource(item, generation, item.editVersion)));
+    await Promise.all(items.map((item) => rebuildItemSource(item, item.editVersion)));
     if (generation !== state.reprocessGeneration) return;
     render();
     renderPhotoList();
@@ -2261,6 +2291,7 @@
   }
 
   function releaseItem(item) {
+    item.sourceGeneration += 1;
     if (item.remote) {
       item.remote.revision += 1;
       item.remote.abortController?.abort();
@@ -2747,6 +2778,7 @@
       showNotice("请先取消当前导出，再裁切照片");
       return;
     }
+    const requestGeneration = ++state.cropRequestGeneration;
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item) return;
     try {
@@ -2755,32 +2787,38 @@
       if (error.name !== "AbortError") showNotice(`无法获取 ${item.name} 的原图，暂不能裁切`);
       return;
     }
+    if (
+      requestGeneration !== state.cropRequestGeneration ||
+      !state.items.includes(item)
+    ) return;
 
     cropModal.hidden = false;
     document.body.style.overflow = "hidden";
 
-    // 使用 editSource（已裁切版本）作为裁切基准，实现多次裁切叠加
-    // 如果尚未裁切过，则使用 originalSource
-    const cropBase = item.editSource || item.originalSource;
-    const baseW = cropBase.width;
-    const baseH = cropBase.height;
+    // 使用当前渲染源作为裁切基准，确保预览与主界面方向一致
+    const cropSource = item.source;
+    const sourceW = cropSource.width;
+    const sourceH = cropSource.height;
 
-    // 在 canvas 上绘制裁切基准图
+    // 在 canvas 上绘制当前渲染源
     const maxW = 640;
     const maxH = 480;
-    const scale = Math.min(1, maxW / baseW, maxH / baseH);
-    const displayW = Math.round(baseW * scale);
-    const displayH = Math.round(baseH * scale);
+    const scale = Math.min(1, maxW / sourceW, maxH / sourceH);
+    const displayW = Math.round(sourceW * scale);
+    const displayH = Math.round(sourceH * scale);
 
     cropCanvas.width = displayW;
     cropCanvas.height = displayH;
     const cropCtx = cropCanvas.getContext("2d");
-    cropCtx.drawImage(cropBase, 0, 0, displayW, displayH);
+    cropCtx.drawImage(cropSource, 0, 0, displayW, displayH);
 
-    // 计算初始裁切区域,保持当前底片画幅比例
-    const aspectRatio = getFormat().ratio;
+    // 计算初始裁切区域，保持当前输入画幅比例和图片方向
+    const slotRatio = getCurrentInputAdapter().slotRatio;
+    const aspectRatio = sourceW >= sourceH
+      ? Math.max(slotRatio, 1 / slotRatio)
+      : Math.min(slotRatio, 1 / slotRatio);
     // 裁切基准图的画幅比
-    const baseAspect = baseW / baseH;
+    const baseAspect = sourceW / sourceH;
     let cropW, cropH, cropX, cropY;
 
     // 如果裁切基准图的画幅已经接近目标画幅，初始裁切区域覆盖整张图
@@ -2822,6 +2860,11 @@
       cropW,
       cropH,
       aspectRatio,
+      cropSource,
+      sourceW,
+      sourceH,
+      baseSource: item.editSource || item.originalSource,
+      sourceTurns: (item.autoTurns + item.manualTurns) % 4,
       editVersion: item.editVersion,
       drag: null,
       // 保存初始状态用于重置
@@ -2834,7 +2877,9 @@
     updateCropOverlay();
   }
 
-  function closeCropModal() {
+  function closeCropModal(cropState = null) {
+    if (cropState && state.cropState !== cropState) return;
+    state.cropRequestGeneration += 1;
     cropModal.hidden = true;
     document.body.style.overflow = "";
     state.cropState = null;
@@ -2884,6 +2929,7 @@
     }
 
     state.cropState.drag = {
+      pointerId: event.pointerId,
       mode,
       startX,
       startY,
@@ -2897,7 +2943,11 @@
     };
 
     const onMove = (e) => {
-      if (!state.cropState || !state.cropState.drag) return;
+      if (
+        !state.cropState ||
+        !state.cropState.drag ||
+        e.pointerId !== state.cropState.drag.pointerId
+      ) return;
       // 标记正在拖拽
       state.cropState.isDragging = true;
 
@@ -2949,7 +2999,8 @@
       updateCropOverlay();
     };
 
-    const onEnd = () => {
+    const onEnd = (e) => {
+      if (e.pointerId !== event.pointerId) return;
       if (state.cropState) state.cropState.drag = null;
       // 延迟清除拖拽标志,避免 pointerup 后的 click 事件触发关闭
       setTimeout(() => {
@@ -2959,14 +3010,16 @@
       }, 10);
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onEnd);
+      document.removeEventListener("pointercancel", onEnd);
     };
 
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onEnd);
+    document.addEventListener("pointercancel", onEnd);
   });
 
-  cropClose.addEventListener("click", closeCropModal);
-  cropCancel.addEventListener("click", closeCropModal);
+  cropClose.addEventListener("click", () => closeCropModal());
+  cropCancel.addEventListener("click", () => closeCropModal());
   cropReset.addEventListener("click", () => {
     if (!state.cropState) return;
     // 恢复到初始裁剪区域
@@ -3008,21 +3061,20 @@
     item.editHeight = item.originalHeight;
     item.manualTurns = 0;
     item.editVersion += 1;
-    const generation = ++state.reprocessGeneration;
+    const rebuildVersion = item.editVersion;
 
-    closeCropModal();
-    await rebuildItemSource(item, generation, item.editVersion);
+    closeCropModal(state.cropState);
+    const rebuilt = await rebuildItemSource(item, rebuildVersion);
+    if (!rebuilt) return;
 
     // 释放旧资源
-    if (oldEditSource && oldEditSource !== item.originalSource) {
-      closeSource(oldEditSource);
-    }
     if (
-      oldRenderSource !== item.originalSource &&
-      oldRenderSource !== oldEditSource &&
-      oldRenderSource !== item.source
+      oldEditSource &&
+      oldEditSource !== oldRenderSource &&
+      oldEditSource !== item.originalSource &&
+      oldEditSource !== item.source
     ) {
-      closeSource(oldRenderSource);
+      closeSource(oldEditSource);
     }
 
     render();
@@ -3047,52 +3099,108 @@
       return;
     }
     if (!state.cropState) return;
-    const { itemId, displayW, displayH, cropX, cropY, cropW, cropH, editVersion } = state.cropState;
+    const cropState = state.cropState;
+    const {
+      itemId,
+      displayW,
+      displayH,
+      cropX,
+      cropY,
+      cropW,
+      cropH,
+      cropSource,
+      sourceW,
+      sourceH,
+      baseSource,
+      sourceTurns,
+      editVersion,
+    } = cropState;
     const item = state.items.find((entry) => entry.id === itemId);
-    if (!item || item.editVersion !== editVersion) {
+    if (
+      !item ||
+      item.editVersion !== editVersion ||
+      state.cropState !== cropState ||
+      item.source !== cropSource ||
+      (item.editSource || item.originalSource) !== baseSource
+    ) {
       closeCropModal();
       showNotice("图片状态已变化，请重新打开裁切工具");
       return;
     }
 
-    // 裁切基于 editSource（有则用）或 originalSource，实现多次裁切叠加
-    const cropBase = item.editSource || item.originalSource;
-    const sourceW = cropBase.width;
-    const sourceH = cropBase.height;
-    const realX = Math.round(cropX * sourceW / displayW);
-    const realY = Math.round(cropY * sourceH / displayH);
-    const realRight = Math.round((cropX + cropW) * sourceW / displayW);
-    const realBottom = Math.round((cropY + cropH) * sourceH / displayH);
-    const realW = Math.max(1, realRight - realX);
-    const realH = Math.max(1, realBottom - realY);
+    const renderedX = clamp(Math.floor(cropX * sourceW / displayW), 0, sourceW - 1);
+    const renderedY = clamp(Math.floor(cropY * sourceH / displayH), 0, sourceH - 1);
+    const renderedRight = clamp(
+      Math.ceil((cropX + cropW) * sourceW / displayW),
+      renderedX + 1,
+      sourceW,
+    );
+    const renderedBottom = clamp(
+      Math.ceil((cropY + cropH) * sourceH / displayH),
+      renderedY + 1,
+      sourceH,
+    );
+    const sourceCrop = mapRotatedCropToSource(
+      renderedX,
+      renderedY,
+      renderedRight - renderedX,
+      renderedBottom - renderedY,
+      baseSource.width,
+      baseSource.height,
+      sourceTurns,
+    );
     const canvas = document.createElement("canvas");
-    canvas.width = realW;
-    canvas.height = realH;
+    canvas.width = sourceCrop.width;
+    canvas.height = sourceCrop.height;
     const cropCtx = canvas.getContext("2d");
-    cropCtx.drawImage(cropBase, realX, realY, realW, realH, 0, 0, realW, realH);
+    cropCtx.drawImage(
+      baseSource,
+      sourceCrop.x,
+      sourceCrop.y,
+      sourceCrop.width,
+      sourceCrop.height,
+      0,
+      0,
+      sourceCrop.width,
+      sourceCrop.height,
+    );
     const newEditSource = await canvasToSource(canvas);
+
+    if (
+      !item ||
+      item.editVersion !== editVersion ||
+      state.cropState !== cropState ||
+      item.source !== cropSource ||
+      (item.editSource || item.originalSource) !== baseSource
+    ) {
+      closeSource(newEditSource);
+      closeCropModal(cropState);
+      showNotice("图片状态已变化，请重新打开裁切工具");
+      return;
+    }
 
     const oldEditSource = item.editSource;
     const oldRenderSource = item.source;
     item.editSource = newEditSource;
-    item.editWidth = realW;
-    item.editHeight = realH;
-    item.manualTurns = 0;
+    item.editWidth = newEditSource.width;
+    item.editHeight = newEditSource.height;
     item.editVersion += 1;
-    const generation = ++state.reprocessGeneration;
-    await rebuildItemSource(item, generation, item.editVersion);
-    if (oldEditSource && oldEditSource !== item.originalSource && oldEditSource !== item.source) {
-      closeSource(oldEditSource);
+    const rebuildVersion = item.editVersion;
+    const rebuilt = await rebuildItemSource(item, rebuildVersion);
+    if (!rebuilt) {
+      if (item.editSource !== newEditSource) closeSource(newEditSource);
+      return;
     }
     if (
-      oldRenderSource !== item.originalSource &&
-      oldRenderSource !== oldEditSource &&
-      oldRenderSource !== item.source
+      oldEditSource &&
+      oldEditSource !== oldRenderSource &&
+      oldEditSource !== item.originalSource &&
+      oldEditSource !== item.source
     ) {
-      closeSource(oldRenderSource);
+      closeSource(oldEditSource);
     }
 
-    closeCropModal();
+    closeCropModal(cropState);
     render();
     renderPhotoList();
     showNotice("已应用裁切");
@@ -3115,8 +3223,8 @@
     }
     item.manualTurns = (item.manualTurns + 1) % 4;
     item.editVersion += 1;
-    const generation = ++state.reprocessGeneration;
-    await rebuildItemSource(item, generation, item.editVersion);
+    const rebuilt = await rebuildItemSource(item, item.editVersion);
+    if (!rebuilt) return;
     render();
     renderPhotoList();
     showNotice("已旋转 90°");
