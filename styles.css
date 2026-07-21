@@ -655,7 +655,7 @@ select {
   z-index: 1;
   display: flex;
   flex-direction: column;
-  width: min(880px, calc(100vw - 40px));
+  width: min(420px, calc(100vw - 40px));
   max-height: calc(100vh - 60px);
   overflow: hidden;
   border-radius: 14px;
@@ -706,7 +706,7 @@ select {
 
 .frame-export-body {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(220px, 0.7fr);
+  grid-template-columns: 1fr;
   gap: 20px;
   overflow: auto;
   padding: 22px;
@@ -750,25 +750,18 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.frame-export-info {
-  grid-column: 2;
-  align-self: end;
-  padding: 12px 14px;
-  border-radius: 8px;
-  background: rgba(23, 25, 28, 0.05);
-}
-
-.frame-export-info strong {
-  display: block;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.frame-export-info p {
-  margin: 5px 0 0;
-  color: var(--muted);
+.export-warning {
+  margin: 0 24px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(199, 154, 59, 0.12);
+  color: var(--amber);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.export-warning:empty {
+  display: none;
 }
 
 .frame-export-footer {
@@ -789,7 +782,7 @@ select {
 
 @media (max-width: 720px) {
   .frame-export-container {
-    width: min(100vw - 20px, 880px);
+    width: min(100vw - 20px, 420px);
     max-height: calc(100vh - 20px);
   }
 

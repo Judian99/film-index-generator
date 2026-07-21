@@ -93,8 +93,7 @@
   const exportModalClose = document.getElementById("exportModalClose");
   const exportModalCancel = document.getElementById("exportModalCancel");
   const exportModalConfirm = document.getElementById("exportModalConfirm");
-  const exportModalSize = document.getElementById("exportModalSize");
-  const exportModalStatus = document.getElementById("exportModalStatus");
+  const exportMemoryWarning = document.getElementById("exportMemoryWarning");
   const filmStage = document.getElementById("filmStage");
   const filmTitle = document.getElementById("filmTitle");
   const filmDescription = document.getElementById("filmDescription");
@@ -289,8 +288,10 @@
     textOffsetY: 0.38, // 边字中线到胶片外缘的距离 / 边字带高度（真实底片边字几乎贴着片边）
     textSprocketGap: 0.022, // 齿孔带向边字方向收紧的距离 / frameW（越大边字与齿孔离得越近）
     textSprocketGap120: 0.015, // 120 齿孔带向边字方向收紧的距离 / 画幅高
-    band120: 0.044, // 120 边字带高度 / 画幅高
+    band120: 0.034, // 120 边字带高度 / 画幅高
     gap120: 0.085, // 120 帧间隙 / 画幅高
+    margin135: -0.04, // 135 每行左右外侧边距 / frameW（固化参数）
+    margin120: 0, // 120 每行左右外侧边距 / 画幅高
   };
 
   // 浏览器 canvas 尺寸安全上限（保守取值，超出后 toBlob 会得到 null）
@@ -473,6 +474,32 @@
     if (fullResolution) formatSelect.value = "image/png";
     formatSelect.disabled = fullResolution;
     qualityField.style.display = !fullResolution && formatSelect.value === "image/jpeg" ? "grid" : "none";
+
+    // 导出模态框打开时实时更新内存警告
+    if (!exportModal.hidden) {
+      updateExportMemoryWarning();
+    }
+  }
+
+  function updateExportMemoryWarning() {
+    const items = getSortedItems();
+    if (!items.length) { exportMemoryWarning.textContent = ""; return; }
+    const isFullResolution = exportScale.value === "full";
+    const scale = isFullResolution
+      ? getFullResolutionScale(items)
+      : clamp(Number(exportScale.value) || 1, 1, 3);
+    if (!Number.isFinite(scale) || scale <= 0) { exportMemoryWarning.textContent = ""; return; }
+    const options = getRenderOptions(scale);
+    const layout = computeLayout(items.length, options);
+    const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
+    const estimatedPeakBytes = estimatedPixelBytes * 2;
+    const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
+    const memoryWarningThreshold = 500 * 1024 * 1024;
+    if (estimatedPeakBytes > memoryWarningThreshold) {
+      exportMemoryWarning.textContent = `⚠ 导出约需 ${estimatedPeakMB}MB 内存，老旧设备可能闪退，建议降低导出质量或减少照片`;
+    } else {
+      exportMemoryWarning.textContent = "";
+    }
   }
 
   function openExportModal() {
@@ -481,19 +508,7 @@
       return;
     }
     updateExportFormatControls();
-    const items = getSortedItems();
-    const isFullResolution = exportScale.value === "full";
-    const scale = isFullResolution
-      ? getFullResolutionScale(items)
-      : clamp(Number(exportScale.value) || 1, 1, 3);
-    if (Number.isFinite(scale) && scale > 0) {
-      const options = getRenderOptions(scale);
-      const layout = computeLayout(items.length, options);
-      exportModalSize.textContent = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} 像素`;
-    } else {
-      exportModalSize.textContent = "—";
-    }
-    exportModalStatus.textContent = "准备好后点击确认导出";
+    updateExportMemoryWarning();
     exportModal.hidden = false;
     document.body.style.overflow = "hidden";
     exportModalClose.focus();
@@ -898,6 +913,7 @@
       editSource: null,
       editWidth: originalSource.width,
       editHeight: originalSource.height,
+      cropRect: null,
       manualTurns: 0,
       autoTurns: 0,
       editVersion: 0,
@@ -927,6 +943,7 @@
       editSource: null,
       editWidth: originalSource.width,
       editHeight: originalSource.height,
+      cropRect: null,
       manualTurns: 0,
       autoTurns: 0,
       editVersion: 0,
@@ -1021,45 +1038,73 @@
             editSource: null,
             editWidth: fullSource.width,
             editHeight: fullSource.height,
+            cropRect: null,
             source: fullSource,
             width: fullSource.width,
             height: fullSource.height,
             taken,
-            editVersion: item.editVersion + 1,
+            sourceGeneration: 0,
           };
           let rebuilt = false;
           while (!rebuilt && !controller.signal.aborted) {
+            candidate.cropRect = item.cropRect ? { ...item.cropRect } : null;
+            candidate.manualTurns = item.manualTurns;
+            candidate.editVersion = item.editVersion + 1;
+            candidate.editSource = null;
+            candidate.editWidth = fullSource.width;
+            candidate.editHeight = fullSource.height;
+            candidate.source = fullSource;
+            candidate.width = fullSource.width;
+            candidate.height = fullSource.height;
+            candidate.sourceGeneration = 0;
+            state.reprocessGeneration += 1;
             rebuilt = await rebuildItemSource(candidate, candidate.editVersion);
+            if (rebuilt && item.editVersion + 1 !== candidate.editVersion) {
+              closeDistinctSources(
+                candidate.source === fullSource ? null : candidate.source,
+                candidate.editSource === fullSource ? null : candidate.editSource,
+              );
+              rebuilt = false;
+            }
           }
           if (
             !rebuilt ||
             controller.signal.aborted ||
             remote.revision !== revision ||
-            !state.items.includes(item)
+            !state.items.includes(item) ||
+            item.editVersion + 1 !== candidate.editVersion
           ) {
-            closeDistinctSources(candidate.source, fullSource);
+            closeDistinctSources(candidate.source, candidate.editSource, fullSource);
             fullSource = null;
             throw new DOMException("Aborted", "AbortError");
           }
 
           const previewOriginal = item.originalSource;
+          const previewEditSource = item.editSource;
           const previewSource = item.source;
           item.file = candidate.file;
           item.originalSource = candidate.originalSource;
           item.originalWidth = candidate.originalWidth;
           item.originalHeight = candidate.originalHeight;
-          item.editSource = null;
+          item.editSource = candidate.editSource;
           item.editWidth = candidate.editWidth;
           item.editHeight = candidate.editHeight;
+          item.cropRect = candidate.cropRect;
           item.source = candidate.source;
           item.width = candidate.width;
           item.height = candidate.height;
           item.taken = candidate.taken;
           item.editVersion = candidate.editVersion;
+          item.sourceGeneration += 1;
           item.autoTurns = candidate.autoTurns;
           remote.quality = "full";
           fullSource = null;
-          closeDistinctSources(previewSource, previewOriginal);
+          const adopted = new Set([item.originalSource, item.editSource, item.source]);
+          closeDistinctSources(
+            adopted.has(previewSource) ? null : previewSource,
+            adopted.has(previewEditSource) ? null : previewEditSource,
+            adopted.has(previewOriginal) ? null : previewOriginal,
+          );
         });
         render();
         renderPhotoList();
@@ -1162,8 +1207,48 @@
     return matches ? 0 : 1;
   }
 
+  function normalizeCropRect(rect) {
+    if (!rect) return null;
+    const x = clamp(Number(rect.x) || 0, 0, 1);
+    const y = clamp(Number(rect.y) || 0, 0, 1);
+    const right = clamp(x + (Number(rect.w) || 0), x, 1);
+    const bottom = clamp(y + (Number(rect.h) || 0), y, 1);
+    if (right <= x || bottom <= y) return null;
+    return { x, y, w: right - x, h: bottom - y };
+  }
+
+  function cropRectToPixels(rect, width, height) {
+    const normalized = normalizeCropRect(rect);
+    if (!normalized) return { x: 0, y: 0, width, height };
+    const x = clamp(Math.floor(normalized.x * width), 0, width - 1);
+    const y = clamp(Math.floor(normalized.y * height), 0, height - 1);
+    const right = clamp(Math.ceil((normalized.x + normalized.w) * width), x + 1, width);
+    const bottom = clamp(Math.ceil((normalized.y + normalized.h) * height), y + 1, height);
+    return { x, y, width: right - x, height: bottom - y };
+  }
+
+  async function cropSourceToRect(source, rect) {
+    const crop = cropRectToPixels(rect, source.width, source.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = crop.width;
+    canvas.height = crop.height;
+    const cropCtx = canvas.getContext("2d");
+    cropCtx.drawImage(
+      source,
+      crop.x,
+      crop.y,
+      crop.width,
+      crop.height,
+      0,
+      0,
+      crop.width,
+      crop.height,
+    );
+    return canvasToSource(canvas);
+  }
+
   function mapRotatedCropToSource(x, y, width, height, sourceWidth, sourceHeight, turns) {
-    switch (turns % 4) {
+    switch ((turns % 4 + 4) % 4) {
       case 1:
         return { x: y, y: sourceHeight - x - width, width: height, height: width };
       case 2:
@@ -1180,41 +1265,70 @@
     }
   }
 
+  function composeCropRects(existing, local) {
+    const base = normalizeCropRect(existing) || { x: 0, y: 0, w: 1, h: 1 };
+    return normalizeCropRect({
+      x: base.x + local.x * base.w,
+      y: base.y + local.y * base.h,
+      w: local.w * base.w,
+      h: local.h * base.h,
+    });
+  }
+
   async function rebuildItemSource(item, editVersion) {
     const sourceGeneration = ++item.sourceGeneration;
-    const base = item.editSource || item.originalSource;
-    let candidate = base;
-    const derived = [];
-    const autoTurns = getAutoTurnsForSource(base);
+    const original = item.originalSource;
+    let editCandidate = null;
+    let candidate = original;
+    const ownedSources = new Set();
 
+    if (item.cropRect) {
+      editCandidate = await cropSourceToRect(original, item.cropRect);
+      candidate = editCandidate;
+      ownedSources.add(editCandidate);
+    }
+
+    const autoTurns = getAutoTurnsForSource(candidate);
     if (autoTurns) {
-      candidate = await rotateSourceClockwise(candidate);
-      derived.push(candidate);
+      const next = await rotateSourceClockwise(candidate);
+      candidate = next;
+      ownedSources.add(next);
     }
 
     for (let turn = 0; turn < item.manualTurns; turn += 1) {
-      const next = await rotateSourceClockwise(candidate);
-      if (candidate !== base) closeSource(candidate);
+      const previousCandidate = candidate;
+      const next = await rotateSourceClockwise(previousCandidate);
+      if (previousCandidate !== original && previousCandidate !== editCandidate) {
+        ownedSources.delete(previousCandidate);
+        closeSource(previousCandidate);
+      }
       candidate = next;
-      derived.push(candidate);
+      ownedSources.add(next);
     }
 
     const current =
       sourceGeneration === item.sourceGeneration &&
       editVersion === item.editVersion;
     if (!current) {
-      if (candidate !== base) closeSource(candidate);
+      closeDistinctSources(...ownedSources);
       return false;
     }
 
-    const previous = item.source;
+    const previousSource = item.source;
+    const previousEditSource = item.editSource;
+    item.editSource = editCandidate;
+    item.editWidth = editCandidate ? editCandidate.width : original.width;
+    item.editHeight = editCandidate ? editCandidate.height : original.height;
     item.source = candidate;
     item.width = candidate.width;
     item.height = candidate.height;
     item.autoTurns = autoTurns;
-    if (previous !== item.originalSource && previous !== item.editSource && previous !== candidate) {
-      closeSource(previous);
-    }
+
+    const adopted = new Set([original, editCandidate, candidate]);
+    closeDistinctSources(
+      adopted.has(previousSource) ? null : previousSource,
+      adopted.has(previousEditSource) ? null : previousEditSource,
+    );
     return true;
   }
 
@@ -1682,6 +1796,19 @@
       const layout = computeLayout(state.items.length, options);
       const sizeLabel = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()}`;
 
+      // 预估内存占用：RGBA 原始像素 + 编码缓冲（约 1.5–2 倍）
+      const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
+      const estimatedPeakBytes = estimatedPixelBytes * 2;
+      const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
+      const memoryWarningThreshold = 500 * 1024 * 1024; // 500MB 阈值
+
+      if (estimatedPeakBytes > memoryWarningThreshold) {
+        showNotice(
+          `导出约需 ${estimatedPeakMB}MB 内存，如遇闪退请降低导出质量或减少照片数量`,
+          5000,
+        );
+      }
+
       const exceedsCanvasLimit =
         !Number.isFinite(layout.canvasW) ||
         !Number.isFinite(layout.canvasH) ||
@@ -1735,7 +1862,7 @@
       if (error.name === "AbortError") {
         showNotice("原图级 PNG 导出已取消");
       } else if (error.message === "PNG_STREAM_UNSUPPORTED") {
-        showNotice("当前浏览器不支持超大 PNG 流式编码，请改用最新版 Chrome、Edge 或 Firefox，或改用 3x 导出");
+        showNotice("当前浏览器不支持超大 PNG 流式编码，请更新浏览器或改用 3x 导出");
       } else if (error.message === "PNG_DIMENSIONS_TOO_LARGE" || error.message === "PNG_FILE_TOO_LARGE") {
         showNotice("原图级 PNG 尺寸或体积过大，请降低尺寸基准、减少照片或改用 3x 导出");
       } else {
@@ -1905,20 +2032,23 @@
 
   function computeLayout(itemCount, options) {
     const rows = buildRows(itemCount, options);
+    const outerMargin = options.is120
+      ? options.slotH * TUNE.margin120
+      : options.frameW * TUNE.margin135;
     const frameAreaW = options.frameAreaW;
-    const stripW = frameAreaW + options.stripPadX * 2;
+    const stripW = frameAreaW + options.stripPadX * 2 + outerMargin * 2;
     const stripH = options.bandH * 2 + options.slotH;
     const canvasW = Math.round(stripW + options.sheetPad * 2);
     const canvasH = Math.round(rows.length * stripH + (rows.length - 1) * options.rowGap + options.sheetPad * 2);
-    return { rows, stripW, stripH, canvasW, canvasH };
+    return { rows, stripW, stripH, canvasW, canvasH, outerMargin };
   }
 
   function getRowX(layout, rowIndex, options) {
-    if (!options.isWide135 || layout.rows.length < 2) return options.sheetPad;
+    if (!options.isWide135 || layout.rows.length < 2) return options.sheetPad + layout.outerMargin;
 
     const firstRowOffset = layout.rows[1].stripW - layout.rows[0].stripW;
     const baseOffset = Math.max(0, -firstRowOffset);
-    return options.sheetPad + baseOffset + (rowIndex === 0 ? firstRowOffset : 0);
+    return options.sheetPad + layout.outerMargin + baseOffset + (rowIndex === 0 ? firstRowOffset : 0);
   }
 
   function drawLayout(items, options, layout, tile = null) {
@@ -1966,16 +2096,15 @@
 
   function drawFilmRow(items, rowInfo, x, y, layout, rowIndex, options, isPreview) {
     const stripH = layout.stripH;
+    const stripX = x - layout.outerMargin;
     // 宽幅每行在最后一帧后结束；其他格式保留原有末行截断规则
-    const stripW = options.isWide135
-      ? rowInfo.stripW
-      : rowInfo.trimmed
-        ? rowInfo.stripW
-        : layout.stripW;
+    const stripW = options.isWide135 || rowInfo.trimmed
+      ? rowInfo.stripW + layout.outerMargin * 2
+      : layout.stripW;
 
     FilmFrame135.beginStripSurface(
       ctx,
-      x,
+      stripX,
       y,
       stripW,
       stripH,
@@ -1984,7 +2113,7 @@
     );
 
     if (rowInfo.leader) {
-      drawLeaderZone(x, y, stripH, options);
+      drawLeaderZone(stripX, y, stripH, options);
     }
 
     const frameStartX = x + options.stripPadX;
@@ -2013,28 +2142,33 @@
     if (options.showSprockets) {
       const topZoneY = y + options.textH - options.textSprocketShift;
       const bottomZoneY = y + stripH - options.textH - options.sprocketH + options.textSprocketShift;
-      drawSprockets(x, bottomZoneY, stripW, options);
+      // 135 齿孔以 38mm 片距锁定相位：每个标准 36×24mm 帧位固定对应 8 孔。
+      const sprocketOriginX = options.is120
+        ? null
+        : frameStartX - options.edgeMarkGap / 2 + options.sprocketPitch / 2 - options.sprocketHoleW / 2;
+      drawSprockets(stripX, bottomZoneY, stripW, options, null, sprocketOriginX);
       if (rowInfo.leader) {
-        const geo = leaderGeometry(x, y, stripH, options);
-        drawSprockets(x, topZoneY, stripW, options, geo.footX);
+        const geo = leaderGeometry(stripX, y, stripH, options);
+        drawSprockets(stripX, topZoneY, stripW, options, geo.footX, sprocketOriginX);
       } else {
-        drawSprockets(x, topZoneY, stripW, options);
+        drawSprockets(stripX, topZoneY, stripW, options, null, sprocketOriginX);
       }
     }
 
     if (options.showEdgeText) {
+      const edgeTextW = stripW - layout.outerMargin * 2;
       if (options.is120) {
-        drawEdgeTextTop120(x, y, stripW, rowInfo, options);
-        drawEdgeTextBottom120(x, y + stripH - options.textH, stripW, rowInfo, rowIndex, options);
+        drawEdgeTextTop120(x, y, edgeTextW, rowInfo, options);
+        drawEdgeTextBottom120(x, y + stripH - options.textH, edgeTextW, rowInfo, rowIndex, options);
       } else {
-        drawEdgeTextTop(x, y, stripW, rowInfo, rowIndex, options);
-        drawEdgeTextBottom(x, y + stripH - options.textH, stripW, rowInfo, options);
+        drawEdgeTextTop(x, y, edgeTextW, rowInfo, rowIndex, options);
+        drawEdgeTextBottom(x, y + stripH - options.textH, edgeTextW, rowInfo, options);
       }
     }
 
     FilmFrame135.endStripSurface(
       ctx,
-      x,
+      stripX,
       y,
       stripW,
       stripH,
@@ -2076,8 +2210,9 @@
     ctx.moveTo(x + r, y);
 
     if (rowInfo.trailer) {
-      // 剪刀切口：略斜的锯齿状右缘
-      const cut = options.frameW * 0.1;
+      // 剪刀切口：深度受尾帧外侧实际留白限制，避免负外边距时侵入画面。
+      const endClearance = Math.max(0, options.stripPadX + options.frameW * TUNE.margin135);
+      const cut = Math.min(options.frameW * 0.1, endClearance * 0.9 / 0.95);
       ctx.lineTo(xr - cut * 0.2, y);
       ctx.lineTo(xr - cut * 0.75, y + stripH * 0.16);
       ctx.lineTo(xr - cut * 0.3, y + stripH * 0.33);
@@ -2156,8 +2291,17 @@
 
   // 齿孔节距与孔宽由 getRenderOptions 按画幅派生（135 按孔距 4.75mm≈画幅宽 1/8；120 仅 ECN-2 电影卷可见）
   // 胶片条的外层 clip 负责轮廓裁切；片头可过滤在曲线边缘仅剩细碎露出的孔
-  function drawSprockets(x, zoneY, stripW, options, leaderFootX = null) {
-    FilmFrame135.drawSprockets(ctx, x, zoneY, stripW, { ...options, tune: TUNE }, leaderFootX);
+  function drawSprockets(x, zoneY, stripW, options, leaderFootX = null, alignmentOriginX = null) {
+    FilmFrame135.drawSprockets(
+      ctx,
+      x,
+      zoneY,
+      stripW,
+      { ...options, tune: TUNE },
+      leaderFootX,
+      "continuous",
+      alignmentOriginX,
+    );
   }
 
   function drawEdgeTextTop(x, zoneY, stripW, rowInfo, rowIndex, options) {
@@ -2322,13 +2466,13 @@
     if (item.ownsThumbUrl !== false && item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
   }
 
-  function showNotice(message) {
+  function showNotice(message, duration = 5200) {
     noticeEl.textContent = message;
     noticeEl.classList.add("is-visible");
     window.clearTimeout(state.noticeTimer);
     state.noticeTimer = window.setTimeout(() => {
       noticeEl.classList.remove("is-visible");
-    }, 5200);
+    }, duration);
   }
 
   function drawEmptyCanvas() {
@@ -2795,34 +2939,23 @@
 
   // ---- 裁切工具：交互式裁切框 ----
 
-  async function openCropModal(itemId) {
+  function openCropModal(itemId) {
     if (state.isExporting) {
       showNotice("请先取消当前导出，再裁切照片");
       return;
     }
     const requestGeneration = ++state.cropRequestGeneration;
     const item = state.items.find((entry) => entry.id === itemId);
-    if (!item) return;
-    try {
-      await ensureOriginal(item, "裁切");
-    } catch (error) {
-      if (error.name !== "AbortError") showNotice(`无法获取 ${item.name} 的原图，暂不能裁切`);
-      return;
-    }
-    if (
-      requestGeneration !== state.cropRequestGeneration ||
-      !state.items.includes(item)
-    ) return;
+    if (!item || requestGeneration !== state.cropRequestGeneration) return;
 
     cropModal.hidden = false;
     document.body.style.overflow = "hidden";
 
-    // 使用当前渲染源作为裁切基准，确保预览与主界面方向一致
     const cropSource = item.source;
     const sourceW = cropSource.width;
     const sourceH = cropSource.height;
+    const baseSource = item.editSource || item.originalSource;
 
-    // 在 canvas 上绘制当前渲染源
     const maxW = 640;
     const maxH = 480;
     const scale = Math.min(1, maxW / sourceW, maxH / sourceH);
@@ -2834,27 +2967,21 @@
     const cropCtx = cropCanvas.getContext("2d");
     cropCtx.drawImage(cropSource, 0, 0, displayW, displayH);
 
-    // 计算初始裁切区域，保持当前输入画幅比例和图片方向
     const slotRatio = getCurrentInputAdapter().slotRatio;
     const aspectRatio = sourceW >= sourceH
       ? Math.max(slotRatio, 1 / slotRatio)
       : Math.min(slotRatio, 1 / slotRatio);
-    // 裁切基准图的画幅比
     const baseAspect = sourceW / sourceH;
     let cropW, cropH, cropX, cropY;
 
-    // 如果裁切基准图的画幅已经接近目标画幅，初始裁切区域覆盖整张图
-    // 否则按目标画幅计算初始区域
     const aspectDiff = Math.abs(baseAspect - aspectRatio);
     const isAlreadyMatching = aspectDiff < 0.05;
 
     if (isAlreadyMatching) {
-      // 画幅已匹配，初始裁切区域覆盖整张图（留小边距）
       const margin = Math.min(displayW, displayH) * 0.02;
       cropW = displayW - Math.round(margin * 2);
       cropH = displayH - Math.round(margin * 2);
     } else if (aspectRatio >= 1) {
-      // 横图或方图
       cropH = Math.round(displayH * 0.8);
       cropW = Math.round(cropH * aspectRatio);
       if (cropW > displayW) {
@@ -2862,7 +2989,6 @@
         cropH = Math.round(cropW / aspectRatio);
       }
     } else {
-      // 竖图
       cropW = Math.round(displayW * 0.8);
       cropH = Math.round(cropW / aspectRatio);
       if (cropH > displayH) {
@@ -2885,11 +3011,11 @@
       cropSource,
       sourceW,
       sourceH,
-      baseSource: item.editSource || item.originalSource,
+      baseSource,
       sourceTurns: (item.autoTurns + item.manualTurns) % 4,
       editVersion: item.editVersion,
+      requestGeneration,
       drag: null,
-      // 保存初始状态用于重置
       initialCropX: cropX,
       initialCropY: cropY,
       initialCropW: cropW,
@@ -3052,52 +3178,35 @@
     updateCropOverlay();
   });
 
-  // 恢复原图：丢弃所有裁切，回到导入时的原始状态
+  // 恢复原图：丢弃裁切和手动旋转，回到导入时的原始状态
   cropRestoreOriginal.addEventListener("click", async () => {
     if (state.isExporting) {
       showNotice("请先取消当前导出，再恢复照片");
       return;
     }
-    if (!state.cropState) return;
-    const { itemId, editVersion } = state.cropState;
+    const cropState = state.cropState;
+    if (!cropState) return;
+    const { itemId, editVersion } = cropState;
     const item = state.items.find((entry) => entry.id === itemId);
     if (!item || item.editVersion !== editVersion) {
-      closeCropModal();
+      closeCropModal(cropState);
       showNotice("图片状态已变化，请重新打开裁切工具");
       return;
     }
 
-    // 如果没有裁切过，无需恢复
-    if (!item.editSource) {
-      showNotice("该图片尚未裁切");
+    if (!item.cropRect && item.manualTurns === 0) {
+      showNotice("该图片尚未编辑");
       return;
     }
 
-    // 释放旧的 editSource 和 renderSource
-    const oldEditSource = item.editSource;
-    const oldRenderSource = item.source;
-
-    // 重置为原图
-    item.editSource = null;
-    item.editWidth = item.originalWidth;
-    item.editHeight = item.originalHeight;
+    item.cropRect = null;
     item.manualTurns = 0;
     item.editVersion += 1;
     const rebuildVersion = item.editVersion;
 
-    closeCropModal(state.cropState);
+    closeCropModal(cropState);
     const rebuilt = await rebuildItemSource(item, rebuildVersion);
     if (!rebuilt) return;
-
-    // 释放旧资源
-    if (
-      oldEditSource &&
-      oldEditSource !== oldRenderSource &&
-      oldEditSource !== item.originalSource &&
-      oldEditSource !== item.source
-    ) {
-      closeSource(oldEditSource);
-    }
 
     render();
     renderPhotoList();
@@ -3120,8 +3229,8 @@
       showNotice("请先取消当前导出，再应用裁切");
       return;
     }
-    if (!state.cropState) return;
     const cropState = state.cropState;
+    if (!cropState) return;
     const {
       itemId,
       displayW,
@@ -3145,7 +3254,7 @@
       item.source !== cropSource ||
       (item.editSource || item.originalSource) !== baseSource
     ) {
-      closeCropModal();
+      closeCropModal(cropState);
       showNotice("图片状态已变化，请重新打开裁切工具");
       return;
     }
@@ -3162,7 +3271,7 @@
       renderedY + 1,
       sourceH,
     );
-    const sourceCrop = mapRotatedCropToSource(
+    const baseCrop = mapRotatedCropToSource(
       renderedX,
       renderedY,
       renderedRight - renderedX,
@@ -3171,58 +3280,25 @@
       baseSource.height,
       sourceTurns,
     );
-    const canvas = document.createElement("canvas");
-    canvas.width = sourceCrop.width;
-    canvas.height = sourceCrop.height;
-    const cropCtx = canvas.getContext("2d");
-    cropCtx.drawImage(
-      baseSource,
-      sourceCrop.x,
-      sourceCrop.y,
-      sourceCrop.width,
-      sourceCrop.height,
-      0,
-      0,
-      sourceCrop.width,
-      sourceCrop.height,
-    );
-    const newEditSource = await canvasToSource(canvas);
-
-    if (
-      !item ||
-      item.editVersion !== editVersion ||
-      state.cropState !== cropState ||
-      item.source !== cropSource ||
-      (item.editSource || item.originalSource) !== baseSource
-    ) {
-      closeSource(newEditSource);
-      closeCropModal(cropState);
-      showNotice("图片状态已变化，请重新打开裁切工具");
+    const localCrop = normalizeCropRect({
+      x: clamp(baseCrop.x, 0, baseSource.width - 1) / baseSource.width,
+      y: clamp(baseCrop.y, 0, baseSource.height - 1) / baseSource.height,
+      w: clamp(baseCrop.width, 1, baseSource.width) / baseSource.width,
+      h: clamp(baseCrop.height, 1, baseSource.height) / baseSource.height,
+    });
+    if (!localCrop) {
+      showNotice("裁切区域无效，请重新选择");
       return;
     }
 
-    const oldEditSource = item.editSource;
-    const oldRenderSource = item.source;
-    item.editSource = newEditSource;
-    item.editWidth = newEditSource.width;
-    item.editHeight = newEditSource.height;
+    item.cropRect = composeCropRects(item.cropRect, localCrop);
     item.editVersion += 1;
     const rebuildVersion = item.editVersion;
-    const rebuilt = await rebuildItemSource(item, rebuildVersion);
-    if (!rebuilt) {
-      if (item.editSource !== newEditSource) closeSource(newEditSource);
-      return;
-    }
-    if (
-      oldEditSource &&
-      oldEditSource !== oldRenderSource &&
-      oldEditSource !== item.originalSource &&
-      oldEditSource !== item.source
-    ) {
-      closeSource(oldEditSource);
-    }
-
+    state.reprocessGeneration += 1;
     closeCropModal(cropState);
+    const rebuilt = await rebuildItemSource(item, rebuildVersion);
+    if (!rebuilt) return;
+
     render();
     renderPhotoList();
     showNotice("已应用裁切");
@@ -3692,6 +3768,7 @@
       { key: "textOffsetY", label: "边字到片边距离 (×边字带)", min: 0.2, max: 0.8, step: 0.02 },
       { key: "textSprocketGap", label: "齿孔向边字收紧 (×frameW)", min: 0, max: 0.05, step: 0.002 },
       { key: "textSprocketGap120", label: "120齿孔向边字收紧 (×画幅高)", min: 0, max: 0.05, step: 0.002 },
+      { key: "margin120", label: "120左右外侧边距 (×画幅高)", min: -0.05, max: 1, step: 0.005 },
     ];
     const defaults = { ...TUNE };
 
