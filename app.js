@@ -2044,11 +2044,11 @@
   }
 
   function getRowX(layout, rowIndex, options) {
-    if (!options.isWide135 || layout.rows.length < 2) return options.sheetPad + layout.outerMargin;
+    const baseX = options.sheetPad + layout.outerMargin;
+    if (!options.isWide135) return baseX;
 
-    const firstRowOffset = layout.rows[1].stripW - layout.rows[0].stripW;
-    const baseOffset = Math.max(0, -firstRowOffset);
-    return options.sheetPad + layout.outerMargin + baseOffset + (rowIndex === 0 ? firstRowOffset : 0);
+    const rowInfo = layout.rows[rowIndex];
+    return baseX + (layout.stripW - rowInfo.stripW) / 2;
   }
 
   function drawLayout(items, options, layout, tile = null) {
