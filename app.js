@@ -2045,11 +2045,23 @@
 
   function getRowX(layout, rowIndex, options) {
     const baseX = options.sheetPad + layout.outerMargin;
-    if (!options.isWide135) return baseX;
+    if (!options.isWide135 || layout.rows.length < 2) return baseX;
 
-    const rowInfo = layout.rows[rowIndex];
-    const rowStripW = rowInfo.stripW + layout.outerMargin * 2;
-    return baseX + (layout.stripW - rowStripW) / 2;
+    const firstRowOffset = layout.rows[1].stripW - layout.rows[0].stripW;
+    const baseOffset = Math.max(0, -firstRowOffset);
+    const getOriginalRowX = (index) => baseX + baseOffset + (index === 0 ? firstRowOffset : 0);
+    if (options.showLeader) return getOriginalRowX(rowIndex);
+
+    let left = Infinity;
+    let right = -Infinity;
+    layout.rows.forEach((row, index) => {
+      const rowX = getOriginalRowX(index);
+      left = Math.min(left, rowX - layout.outerMargin);
+      right = Math.max(right, rowX + row.stripW + layout.outerMargin);
+    });
+    const groupOffset = layout.canvasW / 2 - (left + right) / 2;
+
+    return getOriginalRowX(rowIndex) + groupOffset;
   }
 
   function drawLayout(items, options, layout, tile = null) {
