@@ -140,7 +140,16 @@
     return geometry;
   }
 
-  function drawSprockets(ctx, x, zoneY, stripW, options, leaderFootX = null, alignment = "continuous") {
+  function drawSprockets(
+    ctx,
+    x,
+    zoneY,
+    stripW,
+    options,
+    leaderFootX = null,
+    alignment = "continuous",
+    alignmentOriginX = null,
+  ) {
     const tune = getTune(options);
     const pitch = options.sprocketPitch;
     const holeW = options.sprocketHoleW;
@@ -151,9 +160,18 @@
     const availableW = stripW - margin * 2;
     const continuousHoleCount = Math.max(0, Math.floor((availableW - holeW) / pitch) + 1);
     const centeredHoleCount = Math.max(1, Math.round(stripW / pitch));
-    const holeCount = alignment === "center" ? centeredHoleCount : continuousHoleCount;
-    const groupW = holeCount > 0 ? (holeCount - 1) * pitch + holeW : 0;
-    const startX = alignment === "center" ? x + (stripW - groupW) / 2 : x + margin;
+    const anchored = Number.isFinite(alignmentOriginX);
+    const firstAnchoredIndex = anchored ? Math.ceil((x - alignmentOriginX) / pitch) : 0;
+    const startX = anchored
+      ? alignmentOriginX + firstAnchoredIndex * pitch
+      : alignment === "center"
+        ? x + (stripW - ((centeredHoleCount - 1) * pitch + holeW)) / 2
+        : x + margin;
+    const holeCount = anchored
+      ? Math.max(0, Math.floor((x + stripW - holeW - startX) / pitch) + 1)
+      : alignment === "center"
+        ? centeredHoleCount
+        : continuousHoleCount;
 
     for (let index = 0; index < holeCount; index += 1) {
       const hx = startX + index * pitch;

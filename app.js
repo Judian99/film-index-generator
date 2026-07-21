@@ -93,8 +93,7 @@
   const exportModalClose = document.getElementById("exportModalClose");
   const exportModalCancel = document.getElementById("exportModalCancel");
   const exportModalConfirm = document.getElementById("exportModalConfirm");
-  const exportModalSize = document.getElementById("exportModalSize");
-  const exportModalStatus = document.getElementById("exportModalStatus");
+  const exportMemoryWarning = document.getElementById("exportMemoryWarning");
   const filmStage = document.getElementById("filmStage");
   const filmTitle = document.getElementById("filmTitle");
   const filmDescription = document.getElementById("filmDescription");
@@ -288,8 +287,10 @@
     textOffsetY: 0.38, // 边字中线到胶片外缘的距离 / 边字带高度（真实底片边字几乎贴着片边）
     textSprocketGap: 0.022, // 齿孔带向边字方向收紧的距离 / frameW（越大边字与齿孔离得越近）
     textSprocketGap120: 0.015, // 120 齿孔带向边字方向收紧的距离 / 画幅高
-    band120: 0.044, // 120 边字带高度 / 画幅高
+    band120: 0.034, // 120 边字带高度 / 画幅高
     gap120: 0.085, // 120 帧间隙 / 画幅高
+    margin135: -0.04, // 135 每行左右外侧边距 / frameW（固化参数）
+    margin120: 0, // 120 每行左右外侧边距 / 画幅高
   };
 
   // 浏览器 canvas 尺寸安全上限（保守取值，超出后 toBlob 会得到 null）
@@ -472,6 +473,32 @@
     if (fullResolution) formatSelect.value = "image/png";
     formatSelect.disabled = fullResolution;
     qualityField.style.display = !fullResolution && formatSelect.value === "image/jpeg" ? "grid" : "none";
+
+    // 导出模态框打开时实时更新内存警告
+    if (!exportModal.hidden) {
+      updateExportMemoryWarning();
+    }
+  }
+
+  function updateExportMemoryWarning() {
+    const items = getSortedItems();
+    if (!items.length) { exportMemoryWarning.textContent = ""; return; }
+    const isFullResolution = exportScale.value === "full";
+    const scale = isFullResolution
+      ? getFullResolutionScale(items)
+      : clamp(Number(exportScale.value) || 1, 1, 3);
+    if (!Number.isFinite(scale) || scale <= 0) { exportMemoryWarning.textContent = ""; return; }
+    const options = getRenderOptions(scale);
+    const layout = computeLayout(items.length, options);
+    const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
+    const estimatedPeakBytes = estimatedPixelBytes * 2;
+    const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
+    const memoryWarningThreshold = 500 * 1024 * 1024;
+    if (estimatedPeakBytes > memoryWarningThreshold) {
+      exportMemoryWarning.textContent = `⚠ 导出约需 ${estimatedPeakMB}MB 内存，老旧设备可能闪退，建议降低导出质量或减少照片`;
+    } else {
+      exportMemoryWarning.textContent = "";
+    }
   }
 
   function openExportModal() {
@@ -480,19 +507,7 @@
       return;
     }
     updateExportFormatControls();
-    const items = getSortedItems();
-    const isFullResolution = exportScale.value === "full";
-    const scale = isFullResolution
-      ? getFullResolutionScale(items)
-      : clamp(Number(exportScale.value) || 1, 1, 3);
-    if (Number.isFinite(scale) && scale > 0) {
-      const options = getRenderOptions(scale);
-      const layout = computeLayout(items.length, options);
-      exportModalSize.textContent = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} 像素`;
-    } else {
-      exportModalSize.textContent = "—";
-    }
-    exportModalStatus.textContent = "准备好后点击确认导出";
+    updateExportMemoryWarning();
     exportModal.hidden = false;
     document.body.style.overflow = "hidden";
     exportModalClose.focus();
@@ -1630,6 +1645,19 @@
       const layout = computeLayout(state.items.length, options);
       const sizeLabel = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()}`;
 
+      // 预估内存占用：RGBA 原始像素 + 编码缓冲（约 1.5–2 倍）
+      const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
+      const estimatedPeakBytes = estimatedPixelBytes * 2;
+      const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
+      const memoryWarningThreshold = 500 * 1024 * 1024; // 500MB 阈值
+
+      if (estimatedPeakBytes > memoryWarningThreshold) {
+        showNotice(
+          `导出约需 ${estimatedPeakMB}MB 内存，如遇闪退请降低导出质量或减少照片数量`,
+          5000,
+        );
+      }
+
       const exceedsCanvasLimit =
         !Number.isFinite(layout.canvasW) ||
         !Number.isFinite(layout.canvasH) ||
@@ -1683,7 +1711,7 @@
       if (error.name === "AbortError") {
         showNotice("原图级 PNG 导出已取消");
       } else if (error.message === "PNG_STREAM_UNSUPPORTED") {
-        showNotice("当前浏览器不支持超大 PNG 流式编码，请改用最新版 Chrome、Edge 或 Firefox，或改用 3x 导出");
+        showNotice("当前浏览器不支持超大 PNG 流式编码，请更新浏览器或改用 3x 导出");
       } else if (error.message === "PNG_DIMENSIONS_TOO_LARGE" || error.message === "PNG_FILE_TOO_LARGE") {
         showNotice("原图级 PNG 尺寸或体积过大，请降低尺寸基准、减少照片或改用 3x 导出");
       } else {
@@ -1853,20 +1881,23 @@
 
   function computeLayout(itemCount, options) {
     const rows = buildRows(itemCount, options);
+    const outerMargin = options.is120
+      ? options.slotH * TUNE.margin120
+      : options.frameW * TUNE.margin135;
     const frameAreaW = options.frameAreaW;
-    const stripW = frameAreaW + options.stripPadX * 2;
+    const stripW = frameAreaW + options.stripPadX * 2 + outerMargin * 2;
     const stripH = options.bandH * 2 + options.slotH;
     const canvasW = Math.round(stripW + options.sheetPad * 2);
     const canvasH = Math.round(rows.length * stripH + (rows.length - 1) * options.rowGap + options.sheetPad * 2);
-    return { rows, stripW, stripH, canvasW, canvasH };
+    return { rows, stripW, stripH, canvasW, canvasH, outerMargin };
   }
 
   function getRowX(layout, rowIndex, options) {
-    if (!options.isWide135 || layout.rows.length < 2) return options.sheetPad;
+    if (!options.isWide135 || layout.rows.length < 2) return options.sheetPad + layout.outerMargin;
 
     const firstRowOffset = layout.rows[1].stripW - layout.rows[0].stripW;
     const baseOffset = Math.max(0, -firstRowOffset);
-    return options.sheetPad + baseOffset + (rowIndex === 0 ? firstRowOffset : 0);
+    return options.sheetPad + layout.outerMargin + baseOffset + (rowIndex === 0 ? firstRowOffset : 0);
   }
 
   function drawLayout(items, options, layout, tile = null) {
@@ -1914,16 +1945,15 @@
 
   function drawFilmRow(items, rowInfo, x, y, layout, rowIndex, options, isPreview) {
     const stripH = layout.stripH;
+    const stripX = x - layout.outerMargin;
     // 宽幅每行在最后一帧后结束；其他格式保留原有末行截断规则
-    const stripW = options.isWide135
-      ? rowInfo.stripW
-      : rowInfo.trimmed
-        ? rowInfo.stripW
-        : layout.stripW;
+    const stripW = options.isWide135 || rowInfo.trimmed
+      ? rowInfo.stripW + layout.outerMargin * 2
+      : layout.stripW;
 
     FilmFrame135.beginStripSurface(
       ctx,
-      x,
+      stripX,
       y,
       stripW,
       stripH,
@@ -1932,7 +1962,7 @@
     );
 
     if (rowInfo.leader) {
-      drawLeaderZone(x, y, stripH, options);
+      drawLeaderZone(stripX, y, stripH, options);
     }
 
     const frameStartX = x + options.stripPadX;
@@ -1961,28 +1991,33 @@
     if (options.showSprockets) {
       const topZoneY = y + options.textH - options.textSprocketShift;
       const bottomZoneY = y + stripH - options.textH - options.sprocketH + options.textSprocketShift;
-      drawSprockets(x, bottomZoneY, stripW, options);
+      // 135 齿孔以 38mm 片距锁定相位：每个标准 36×24mm 帧位固定对应 8 孔。
+      const sprocketOriginX = options.is120
+        ? null
+        : frameStartX - options.edgeMarkGap / 2 + options.sprocketPitch / 2 - options.sprocketHoleW / 2;
+      drawSprockets(stripX, bottomZoneY, stripW, options, null, sprocketOriginX);
       if (rowInfo.leader) {
-        const geo = leaderGeometry(x, y, stripH, options);
-        drawSprockets(x, topZoneY, stripW, options, geo.footX);
+        const geo = leaderGeometry(stripX, y, stripH, options);
+        drawSprockets(stripX, topZoneY, stripW, options, geo.footX, sprocketOriginX);
       } else {
-        drawSprockets(x, topZoneY, stripW, options);
+        drawSprockets(stripX, topZoneY, stripW, options, null, sprocketOriginX);
       }
     }
 
     if (options.showEdgeText) {
+      const edgeTextW = stripW - layout.outerMargin * 2;
       if (options.is120) {
-        drawEdgeTextTop120(x, y, stripW, rowInfo, options);
-        drawEdgeTextBottom120(x, y + stripH - options.textH, stripW, rowInfo, rowIndex, options);
+        drawEdgeTextTop120(x, y, edgeTextW, rowInfo, options);
+        drawEdgeTextBottom120(x, y + stripH - options.textH, edgeTextW, rowInfo, rowIndex, options);
       } else {
-        drawEdgeTextTop(x, y, stripW, rowInfo, rowIndex, options);
-        drawEdgeTextBottom(x, y + stripH - options.textH, stripW, rowInfo, options);
+        drawEdgeTextTop(x, y, edgeTextW, rowInfo, rowIndex, options);
+        drawEdgeTextBottom(x, y + stripH - options.textH, edgeTextW, rowInfo, options);
       }
     }
 
     FilmFrame135.endStripSurface(
       ctx,
-      x,
+      stripX,
       y,
       stripW,
       stripH,
@@ -2024,8 +2059,9 @@
     ctx.moveTo(x + r, y);
 
     if (rowInfo.trailer) {
-      // 剪刀切口：略斜的锯齿状右缘
-      const cut = options.frameW * 0.1;
+      // 剪刀切口：深度受尾帧外侧实际留白限制，避免负外边距时侵入画面。
+      const endClearance = Math.max(0, options.stripPadX + options.frameW * TUNE.margin135);
+      const cut = Math.min(options.frameW * 0.1, endClearance * 0.9 / 0.95);
       ctx.lineTo(xr - cut * 0.2, y);
       ctx.lineTo(xr - cut * 0.75, y + stripH * 0.16);
       ctx.lineTo(xr - cut * 0.3, y + stripH * 0.33);
@@ -2104,8 +2140,17 @@
 
   // 齿孔节距与孔宽由 getRenderOptions 按画幅派生（135 按孔距 4.75mm≈画幅宽 1/8；120 仅 ECN-2 电影卷可见）
   // 胶片条的外层 clip 负责轮廓裁切；片头可过滤在曲线边缘仅剩细碎露出的孔
-  function drawSprockets(x, zoneY, stripW, options, leaderFootX = null) {
-    FilmFrame135.drawSprockets(ctx, x, zoneY, stripW, { ...options, tune: TUNE }, leaderFootX);
+  function drawSprockets(x, zoneY, stripW, options, leaderFootX = null, alignmentOriginX = null) {
+    FilmFrame135.drawSprockets(
+      ctx,
+      x,
+      zoneY,
+      stripW,
+      { ...options, tune: TUNE },
+      leaderFootX,
+      "continuous",
+      alignmentOriginX,
+    );
   }
 
   function drawEdgeTextTop(x, zoneY, stripW, rowInfo, rowIndex, options) {
@@ -2269,13 +2314,13 @@
     if (item.ownsThumbUrl !== false && item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
   }
 
-  function showNotice(message) {
+  function showNotice(message, duration = 5200) {
     noticeEl.textContent = message;
     noticeEl.classList.add("is-visible");
     window.clearTimeout(state.noticeTimer);
     state.noticeTimer = window.setTimeout(() => {
       noticeEl.classList.remove("is-visible");
-    }, 5200);
+    }, duration);
   }
 
   function drawEmptyCanvas() {
@@ -3562,6 +3607,7 @@
       { key: "textOffsetY", label: "边字到片边距离 (×边字带)", min: 0.2, max: 0.8, step: 0.02 },
       { key: "textSprocketGap", label: "齿孔向边字收紧 (×frameW)", min: 0, max: 0.05, step: 0.002 },
       { key: "textSprocketGap120", label: "120齿孔向边字收紧 (×画幅高)", min: 0, max: 0.05, step: 0.002 },
+      { key: "margin120", label: "120左右外侧边距 (×画幅高)", min: -0.05, max: 1, step: 0.005 },
     ];
     const defaults = { ...TUNE };
 
