@@ -2048,7 +2048,8 @@
     if (!options.isWide135) return baseX;
 
     const rowInfo = layout.rows[rowIndex];
-    return baseX + (layout.stripW - rowInfo.stripW) / 2;
+    const rowStripW = rowInfo.stripW + layout.outerMargin * 2;
+    return baseX + (layout.stripW - rowStripW) / 2;
   }
 
   function drawLayout(items, options, layout, tile = null) {
