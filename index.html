@@ -173,6 +173,21 @@
               <span>模拟片头片尾</span>
             </label>
             <small id="leaderHint" class="field-hint" hidden></small>
+            <label class="field background-style-field">
+              <span>背景样式</span>
+              <select id="backgroundStyle">
+                <option value="none" selected>无</option>
+                <option value="blur">高斯模糊</option>
+              </select>
+            </label>
+            <label class="field background-blur-field" id="backgroundBlurField">
+              <span class="field-label-with-value">
+                <span>虚化强度</span>
+                <output id="backgroundBlurValue" for="backgroundBlur">24 px</output>
+              </span>
+              <input id="backgroundBlur" type="range" min="8" max="64" step="2" value="24" aria-describedby="backgroundHint" />
+            </label>
+            <small id="backgroundHint" class="field-hint">默认使用首图；点击单帧可将其设为背景</small>
           </section>
 
           <section class="panel-section" aria-label="尺寸设置">
@@ -287,6 +302,13 @@
             </label>
             <button id="zoomIn" class="icon-button" type="button" aria-label="放大预览">+</button>
             <button id="zoomFit" class="text-button" type="button">适合</button>
+            <button id="lightTableButton" class="text-button light-table-entry" type="button" aria-pressed="false" disabled>
+              <span class="light-table-entry-aperture" aria-hidden="true"><span></span></span>
+              <span class="light-table-entry-label">
+                <strong>观片台</strong>
+                <small>LIGHT TABLE</small>
+              </span>
+            </button>
             <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
             <div class="counter" id="imageCounter">0 张</div>
           </div>
@@ -294,6 +316,9 @@
 
         <div class="preview-wrap" id="previewWrap">
           <canvas id="previewCanvas" tabindex="0" aria-label="海带索引图 FILM 预览"></canvas>
+          <div class="optical-loupe" id="opticalLoupe" aria-hidden="true" hidden>
+            <canvas id="opticalLoupeCanvas"></canvas>
+          </div>
           <div class="empty-state" id="emptyState">
             <div class="film-stage" id="filmStage" data-film-state="intro">
               <div class="film-heading">
@@ -337,6 +362,12 @@
             </div>
           </div>
         </div>
+
+        <div class="light-table-hud" id="lightTableHud" role="toolbar" aria-label="观片台工具" hidden>
+          <button id="lightTableExit" class="light-table-exit" type="button">退出观片台</button>
+          <output id="loupeMagnification" class="light-table-magnification-readout" aria-label="观片器倍率">12.0X</output>
+          <span class="light-table-status" id="lightTableStatus" role="status" aria-live="polite">滚轮调节倍率 · 单击切换聚焦</span>
+        </div>
       </section>
     </main>
 
@@ -355,6 +386,10 @@
       <button type="button" role="menuitem" data-action="insert">
         <span class="menu-icon">+</span>
         <span>在此前插入</span>
+      </button>
+      <button type="button" role="menuitemcheckbox" data-action="set-background" aria-checked="false">
+        <span class="menu-icon">◉</span>
+        <span>设为虚化背景</span>
       </button>
       <button type="button" role="menuitem" data-action="export-frame">
         <span class="menu-icon">⇩</span>
@@ -493,6 +528,7 @@
     <script src="baidu-pan-config.js"></script>
     <script src="film-frame-135.js"></script>
     <script src="film-frame.js"></script>
-    <script src="app.js?v=20260721-crop-preview"></script>
+    <script src="optical-loupe.js"></script>
+    <script src="app.js?v=20260724-light-table"></script>
   </body>
 </html>
