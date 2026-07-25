@@ -30,6 +30,11 @@
   const sprocketsHint = document.getElementById("sprocketsHint");
   const showLeader = document.getElementById("showLeader");
   const leaderHint = document.getElementById("leaderHint");
+  const backgroundStyle = document.getElementById("backgroundStyle");
+  const backgroundBlurField = document.getElementById("backgroundBlurField");
+  const backgroundBlur = document.getElementById("backgroundBlur");
+  const backgroundBlurValue = document.getElementById("backgroundBlurValue");
+  const backgroundHint = document.getElementById("backgroundHint");
   const stockSelect = document.getElementById("stockSelect");
   const stockSearch = document.getElementById("stockSearch");
   const stockSearchStatus = document.getElementById("stockSearchStatus");
@@ -62,6 +67,13 @@
   const zoomOut = document.getElementById("zoomOut");
   const zoomIn = document.getElementById("zoomIn");
   const zoomFit = document.getElementById("zoomFit");
+  const lightTableButton = document.getElementById("lightTableButton");
+  const lightTableHud = document.getElementById("lightTableHud");
+  const lightTableExit = document.getElementById("lightTableExit");
+  const lightTableStatus = document.getElementById("lightTableStatus");
+  const loupeMagnificationReadout = document.getElementById("loupeMagnification");
+  const opticalLoupe = document.getElementById("opticalLoupe");
+  const opticalLoupeCanvas = document.getElementById("opticalLoupeCanvas");
   const photoListPanel = document.getElementById("photoListPanel");
   const photoListCount = document.getElementById("photoListCount");
   const photoList = document.getElementById("photoList");
@@ -119,6 +131,7 @@
     stockId: null,
     // 帧操作菜单与裁切工具
     contextItemId: null,
+    backgroundItemId: null,
     cropState: null,
     cropRequestGeneration: 0,
     frameExportState: null,
@@ -131,6 +144,24 @@
     exportCancelled: false,
     sourceCommitPromise: Promise.resolve(),
     isExporting: false,
+    lightTable: {
+      active: false,
+      magnification: 12,
+      pointer: null,
+      focusMode: false,
+      focusPan: null,
+      pointerLockOwned: false,
+      rafId: 0,
+      resizeRafId: 0,
+      hydrationTimer: 0,
+      hydrationRequestId: 0,
+      activeItemId: null,
+      samplePoint: null,
+      transitionId: 0,
+      session: null,
+      sortedItems: null,
+      tileCanvas: null,
+    },
   };
 
   // ---- 胶卷型号：内置与自定义同构的型号对象，按冲洗工艺分档取默认外观 ----
@@ -275,6 +306,9 @@
   if (!FilmFrame135) throw new Error("FilmFrame135 renderer is unavailable.");
   const FilmFrame = window.FilmFrame;
   if (!FilmFrame) throw new Error("FilmFrame renderer is unavailable.");
+  const OpticalLoupe = window.OpticalLoupe;
+  if (!OpticalLoupe) throw new Error("OpticalLoupe renderer is unavailable.");
+  const loupeRenderer = OpticalLoupe.createRenderer(opticalLoupeCanvas);
 
   const DEFAULT_STOCK_ID = "kodak-portra-400";
   const STORAGE_STOCKS_KEY = "filmIndex.customStocks";
@@ -299,6 +333,10 @@
   const MAX_CANVAS_AREA = 16384 * 16384;
   const EXPORT_TILE_SIDE = 8192;
   const PNG_MAX_DIMENSION = 0x7fffffff;
+
+  // 观片器倍率（相对预览显示尺寸的线性放大）无极调节区间
+  const LOUPE_MIN_MAGNIFICATION = 1;
+  const LOUPE_MAX_MAGNIFICATION = 60;
 
   const filmStageStates = {
     intro: {
@@ -431,12 +469,14 @@
       }
       scheduleRender();
       renderPhotoList();
+      updateBackgroundControls();
     });
   });
 
   reverseSort.addEventListener("change", () => {
     scheduleRender();
     renderPhotoList();
+    updateBackgroundControls();
   });
 
   [
@@ -445,6 +485,8 @@
     imageInSprockets,
     imageInEdgeText,
     showLeader,
+    backgroundStyle,
+    backgroundBlur,
     columnsSelect,
     frameWidthInput,
     formatSelect,
@@ -503,6 +545,7 @@
   }
 
   function openExportModal() {
+    if (state.lightTable.active) exitLightTable({ restoreFocus: false });
     if (state.isExporting) {
       showNotice("请先完成当前导出");
       return;
@@ -535,6 +578,501 @@
   });
 
   zoomFit.addEventListener("click", fitPreviewToViewport);
+
+  lightTableButton.addEventListener("click", toggleLightTable);
+  lightTableExit.addEventListener("click", () => exitLightTable());
+  previewWrap.addEventListener("wheel", onLoupeWheel, { passive: false });
+  previewWrap.addEventListener("pointermove", onLightTableSurfacePointerMove);
+  previewWrap.addEventListener("pointerleave", onLightTableSurfacePointerLeave);
+
+  function hasOpenModal() {
+    return (
+      !exportModal.hidden ||
+      !frameExportModal.hidden ||
+      !cropModal.hidden ||
+      Boolean(BaiduPanIntegration?.browserModal && !BaiduPanIntegration.browserModal.hidden)
+    );
+  }
+
+  function syncLightTableControls() {
+    lightTableButton.disabled = !state.items.length || state.isExporting;
+    lightTableButton.setAttribute("aria-pressed", String(state.lightTable.active));
+  }
+
+  function setLightTableStatus(message) {
+    if (lightTableStatus.textContent !== message) lightTableStatus.textContent = message;
+  }
+
+  function canEnterLightTable() {
+    if (!state.items.length) return false;
+    if (state.isExporting || hasOpenModal()) {
+      showNotice("请先完成当前操作，再进入观片台");
+      return false;
+    }
+    return true;
+  }
+
+  function afterLightTableLayout(callback) {
+    requestAnimationFrame(() => requestAnimationFrame(callback));
+  }
+
+  function resizeLoupe() {
+    const diameter = Math.max(1, opticalLoupe.getBoundingClientRect().width || 236);
+    loupeRenderer.resize(diameter, Math.min(window.devicePixelRatio || 1, 2));
+  }
+
+  function previewViewportCenter() {
+    const rect = previewWrap.getBoundingClientRect();
+    return {
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    };
+  }
+
+  function captureCanvasAnchor(sourceClient, targetClient = sourceClient) {
+    if (!sourceClient || !targetClient || !previewCanvas.width || !previewCanvas.height) return null;
+    const rect = previewCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const point = canvasPoint(sourceClient, rect);
+    if (![point.x, point.y, targetClient.clientX, targetClient.clientY].every(Number.isFinite)) return null;
+    return {
+      x: point.x,
+      y: point.y,
+      clientX: targetClient.clientX,
+      clientY: targetClient.clientY,
+    };
+  }
+
+  function anchorFromSamplePoint(point, targetClient) {
+    if (!point || !targetClient) return null;
+    if (![point.x, point.y, targetClient.clientX, targetClient.clientY].every(Number.isFinite)) return null;
+    return {
+      x: point.x,
+      y: point.y,
+      clientX: targetClient.clientX,
+      clientY: targetClient.clientY,
+    };
+  }
+
+  function restoreCanvasAnchor(anchor) {
+    if (!anchor || !previewCanvas.width || !previewCanvas.height) return false;
+    void previewWrap.clientWidth;
+    const rect = previewCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    const displayedX = rect.left + anchor.x * rect.width / previewCanvas.width;
+    const displayedY = rect.top + anchor.y * rect.height / previewCanvas.height;
+    const nextScrollLeft = previewWrap.scrollLeft + displayedX - anchor.clientX;
+    const nextScrollTop = previewWrap.scrollTop + displayedY - anchor.clientY;
+    if (![nextScrollLeft, nextScrollTop].every(Number.isFinite)) return false;
+    previewWrap.scrollLeft = clamp(nextScrollLeft, 0, Math.max(0, previewWrap.scrollWidth - previewWrap.clientWidth));
+    previewWrap.scrollTop = clamp(nextScrollTop, 0, Math.max(0, previewWrap.scrollHeight - previewWrap.clientHeight));
+    return true;
+  }
+
+  function currentLightTableAnchor() {
+    const target = state.lightTable.focusMode ? loupeViewportCenter() : (state.lightTable.pointer || previewViewportCenter());
+    return anchorFromSamplePoint(state.lightTable.samplePoint, target) || captureCanvasAnchor(target, target);
+  }
+
+  function fitLightTableToViewport(anchor = null) {
+    if (!state.lightTable.active || !previewCanvas.width || !previewCanvas.height) return;
+    const styles = getComputedStyle(previewWrap);
+    const availableWidth = Math.max(1, previewWrap.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight));
+    const availableHeight = Math.max(1, previewWrap.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom));
+    setPreviewZoom(Math.min(availableWidth / previewCanvas.width, availableHeight / previewCanvas.height, 2), 0.05, false);
+    if (restoreCanvasAnchor(anchor)) return;
+    previewWrap.scrollLeft = Math.max(0, (previewWrap.scrollWidth - previewWrap.clientWidth) / 2);
+    previewWrap.scrollTop = Math.max(0, (previewWrap.scrollHeight - previewWrap.clientHeight) / 2);
+  }
+
+  function enterLightTable() {
+    if (state.lightTable.active || !canEnterLightTable()) return;
+    hideFrameMenu();
+    cancelCanvasDrag();
+    const transitionId = ++state.lightTable.transitionId;
+    const center = previewViewportCenter();
+    const anchor = captureCanvasAnchor(center, loupeViewportCenter());
+    state.lightTable.session = {
+      previewZoom: state.previewZoom,
+      activeElement: document.activeElement,
+    };
+    state.lightTable.active = true;
+    state.lightTable.pointer = null;
+    state.lightTable.focusMode = false;
+    state.lightTable.focusPan = null;
+    state.lightTable.sortedItems = getSortedItems();
+    document.body.classList.add("is-light-table");
+    document.body.classList.remove("is-loupe-focus");
+    lightTableHud.hidden = false;
+    opticalLoupe.hidden = false;
+    syncLightTableControls();
+    render();
+    afterLightTableLayout(() => {
+      if (!state.lightTable.active || transitionId !== state.lightTable.transitionId) return;
+      resizeLoupe();
+      fitLightTableToViewport(anchor);
+      lightTableExit.focus();
+      updateLoupeReadout();
+    });
+  }
+
+  function clearFocusMode({ restoreView = true } = {}) {
+    if (!state.lightTable.focusMode) return;
+    const focusPan = state.lightTable.focusPan;
+    const center = loupeViewportCenter();
+    const target = state.lightTable.pointer || center;
+    const anchor = restoreView
+      ? (anchorFromSamplePoint(state.lightTable.samplePoint, target) || captureCanvasAnchor(center, target))
+      : null;
+    state.lightTable.focusMode = false;
+    state.lightTable.focusPan = null;
+    document.body.classList.remove("is-loupe-focus");
+    if (document.pointerLockElement === previewCanvas) document.exitPointerLock();
+    if (restoreView && Number.isFinite(focusPan?.previewZoom)) {
+      setPreviewZoom(focusPan.previewZoom, 0.05, false);
+    }
+    if (restoreView) restoreCanvasAnchor(anchor);
+    resizeLoupe();
+  }
+
+  function onLightTablePointerLockChange() {
+    const ownsLock = document.pointerLockElement === previewCanvas;
+    if (ownsLock) {
+      state.lightTable.pointerLockOwned = true;
+      if (!state.lightTable.active || !state.lightTable.focusMode) document.exitPointerLock();
+      return;
+    }
+
+    const lostOwnedLock = state.lightTable.pointerLockOwned;
+    state.lightTable.pointerLockOwned = false;
+    if (lostOwnedLock && state.lightTable.active && state.lightTable.focusMode) exitFocusMode();
+  }
+
+  function onLightTablePointerLockError() {
+    state.lightTable.pointerLockOwned = false;
+  }
+
+  document.addEventListener("pointerlockchange", onLightTablePointerLockChange);
+  document.addEventListener("pointerlockerror", onLightTablePointerLockError);
+
+  function exitFocusMode({ restoreView = true } = {}) {
+    clearFocusMode({ restoreView });
+    updateLoupeReadout();
+    scheduleLoupeFrame();
+  }
+
+  function enterFocusMode(pointer) {
+    if (state.lightTable.focusMode) return;
+    const source = pointer || state.lightTable.pointer || loupeViewportCenter();
+    const center = loupeViewportCenter();
+    const anchor = captureCanvasAnchor(source, center);
+    state.lightTable.focusPan = {
+      previewZoom: state.previewZoom,
+      lastClientX: pointer?.clientX ?? null,
+      lastClientY: pointer?.clientY ?? null,
+    };
+    state.lightTable.focusMode = true;
+    state.lightTable.pointer = source;
+    document.body.classList.add("is-loupe-focus");
+    if (pointer && previewCanvas.requestPointerLock) {
+      try {
+        const lockResult = previewCanvas.requestPointerLock();
+        if (lockResult?.catch) lockResult.catch(() => {});
+      } catch {}
+    }
+
+    // 聚焦时让索引略大于视口，使鼠标移动能在固定镜片下平移背景。
+    const styles = getComputedStyle(previewWrap);
+    const availableWidth = Math.max(1, previewWrap.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight));
+    const availableHeight = Math.max(1, previewWrap.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom));
+    const focusZoom = Math.min(2, Math.max(
+      state.previewZoom * 1.55,
+      availableWidth * 1.18 / previewCanvas.width,
+      availableHeight * 1.18 / previewCanvas.height,
+    ));
+    setPreviewZoom(focusZoom, 0.05, false);
+    restoreCanvasAnchor(anchor);
+    resizeLoupe();
+    updateLoupeReadout();
+    scheduleLoupeFrame();
+  }
+
+  function toggleFocusMode(pointer) {
+    if (state.lightTable.focusMode) exitFocusMode();
+    else enterFocusMode(pointer);
+  }
+
+  function panFocusedBackground(event) {
+    if (!state.lightTable.focusMode || !state.lightTable.focusPan) return;
+    const focusPan = state.lightTable.focusPan;
+    const fallbackX = focusPan.lastClientX == null ? 0 : event.clientX - focusPan.lastClientX;
+    const fallbackY = focusPan.lastClientY == null ? 0 : event.clientY - focusPan.lastClientY;
+    const dx = Number.isFinite(event.movementX) ? event.movementX : fallbackX;
+    const dy = Number.isFinite(event.movementY) ? event.movementY : fallbackY;
+    focusPan.lastClientX = event.clientX;
+    focusPan.lastClientY = event.clientY;
+
+    // 相对位移灵敏度随倍率平方根反比衰减：倍率越高，背景移动越慢，便于精细观察。
+    const sensitivity = clamp(1.6 / Math.sqrt(state.lightTable.magnification), 0.16, 1.2);
+    previewWrap.scrollLeft += dx * sensitivity;
+    previewWrap.scrollTop += dy * sensitivity;
+  }
+
+  function clearLoupeInteraction() {
+    if (state.lightTable.rafId) cancelAnimationFrame(state.lightTable.rafId);
+    if (state.lightTable.resizeRafId) cancelAnimationFrame(state.lightTable.resizeRafId);
+    clearTimeout(state.lightTable.hydrationTimer);
+    state.lightTable.rafId = 0;
+    state.lightTable.resizeRafId = 0;
+    state.lightTable.hydrationTimer = 0;
+    state.lightTable.hydrationRequestId += 1;
+    state.lightTable.pointer = null;
+    state.lightTable.activeItemId = null;
+    state.lightTable.samplePoint = null;
+    state.lightTable.focusMode = false;
+    state.lightTable.focusPan = null;
+    state.lightTable.pointerLockOwned = false;
+    if (document.pointerLockElement === previewCanvas) document.exitPointerLock();
+    state.lightTable.sortedItems = null;
+    document.body.classList.remove("is-loupe-focus");
+    hideLoupe();
+  }
+
+  function exitLightTable({ restoreFocus = true } = {}) {
+    if (!state.lightTable.active) return;
+    const session = state.lightTable.session;
+    const anchor = currentLightTableAnchor();
+    ++state.lightTable.transitionId;
+    cancelCanvasDrag();
+    clearLoupeInteraction();
+    state.lightTable.active = false;
+    state.lightTable.session = null;
+    document.body.classList.remove("is-light-table");
+    lightTableHud.hidden = true;
+    opticalLoupe.hidden = true;
+    syncLightTableControls();
+    render();
+    if (session) {
+      setPreviewZoom(session.previewZoom);
+      if (anchor) {
+        const center = previewViewportCenter();
+        anchor.clientX = center.clientX;
+        anchor.clientY = center.clientY;
+      }
+      restoreCanvasAnchor(anchor);
+      if (restoreFocus) {
+        const target = session.activeElement?.isConnected ? session.activeElement : lightTableButton;
+        target?.focus();
+      }
+    }
+  }
+
+  function toggleLightTable() {
+    if (state.lightTable.active) exitLightTable();
+    else enterLightTable();
+  }
+
+  function updateLoupeReadout() {
+    if (loupeMagnificationReadout) {
+      loupeMagnificationReadout.textContent = `${state.lightTable.magnification.toFixed(1)}X`;
+    }
+    const item = state.items.find((entry) => entry.id === state.lightTable.activeItemId);
+    if (!item) {
+      setLightTableStatus(matchMedia("(hover: hover) and (pointer: fine)").matches ? "滚轮调节倍率 · 单击切换聚焦" : "点按画面定位观片器");
+    } else if (item.remote?.quality === "loading") {
+      setLightTableStatus("正在获取原图…");
+    } else if (item.remote && item.remote.quality !== "full") {
+      setLightTableStatus("当前显示预览图");
+    } else {
+      setLightTableStatus(state.lightTable.focusMode ? "聚焦 · 原图采样" : "原图采样");
+    }
+  }
+
+  function setLoupeMagnification(value) {
+    const clamped = clamp(value, LOUPE_MIN_MAGNIFICATION, LOUPE_MAX_MAGNIFICATION);
+    if (clamped === state.lightTable.magnification) return;
+    state.lightTable.magnification = clamped;
+    updateLoupeReadout();
+    scheduleLoupeFrame();
+  }
+
+  function onLoupeWheel(event) {
+    if (!state.lightTable.active) return;
+    event.preventDefault();
+    // 每 100 单位 deltaY 约 ±12% 倍率，向上滚放大。
+    const factor = Math.exp(-event.deltaY * 0.0011);
+    setLoupeMagnification(state.lightTable.magnification * factor);
+  }
+
+  function onLightTableSurfacePointerMove(event) {
+    if (!state.lightTable.active || event.pointerType === "touch" || event.target === previewCanvas) return;
+    state.lightTable.pointer = { clientX: event.clientX, clientY: event.clientY };
+    if (state.lightTable.focusMode) panFocusedBackground(event);
+    scheduleLoupeFrame();
+  }
+
+  function onLightTableSurfacePointerLeave(event) {
+    if (!state.lightTable.active || state.lightTable.focusMode || event.pointerType === "touch") return;
+    resetLoupeTarget();
+  }
+
+  function hideLoupe() {
+    opticalLoupe.classList.remove("is-visible", "is-hydrating");
+    previewWrap.classList.remove("has-optical-loupe");
+    loupeRenderer.clear();
+  }
+
+  function scheduleOriginalForLoupe(item) {
+    clearTimeout(state.lightTable.hydrationTimer);
+    state.lightTable.hydrationTimer = 0;
+    if (!item.remote || item.remote.quality === "full") return;
+    const requestId = ++state.lightTable.hydrationRequestId;
+    const hydrate = async () => {
+      if (!state.lightTable.active || state.lightTable.activeItemId !== item.id || requestId !== state.lightTable.hydrationRequestId) return;
+      opticalLoupe.classList.add("is-hydrating");
+      setLightTableStatus("正在获取原图…");
+      try {
+        await ensureOriginal(item, "观片器检查");
+        if (!state.lightTable.active || state.lightTable.activeItemId !== item.id || requestId !== state.lightTable.hydrationRequestId) return;
+        opticalLoupe.classList.remove("is-hydrating");
+        setLightTableStatus("原图已就绪");
+        scheduleLoupeFrame();
+      } catch (error) {
+        if (error.name === "AbortError") return;
+        if (state.lightTable.active && state.lightTable.activeItemId === item.id) {
+          opticalLoupe.classList.remove("is-hydrating");
+          setLightTableStatus("原图获取失败，当前显示预览图");
+        }
+      }
+    };
+    if (item.remote.quality === "loading") {
+      void hydrate();
+      return;
+    }
+    state.lightTable.hydrationTimer = window.setTimeout(hydrate, 120);
+  }
+
+  // 把镜片下方的整张索引区域重绘到高分辨率离屏 tile：中心对准 (centerIndexX, centerIndexY)。
+  // 采用 scale=1 布局 + 画布缩放变换，保证与预览同一坐标空间、镜片中心精确对准。
+  function renderLoupeTile(centerIndexX, centerIndexY) {
+    const items = state.lightTable.sortedItems;
+    if (!items || !items.length) return null;
+    const rect = previewCanvas.getBoundingClientRect();
+    if (!rect.width || !previewCanvas.width) return null;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const displayScale = rect.width / previewCanvas.width;
+    const G = state.lightTable.magnification * displayScale * dpr;
+    if (!Number.isFinite(G) || G <= 0) return null;
+
+    const backing = loupeRenderer.backingSize();
+    if (!backing) return null;
+    const T = Math.min(1024, Math.max(1, backing));
+    let tile = state.lightTable.tileCanvas;
+    if (!tile) {
+      tile = document.createElement("canvas");
+      state.lightTable.tileCanvas = tile;
+    }
+
+    const options = getRenderOptions(1);
+    const layout = computeLayout(items.length, options);
+    const halfIndex = T / (2 * G);
+    const cullRect = {
+      x: centerIndexX - halfIndex,
+      y: centerIndexY - halfIndex,
+      width: halfIndex * 2,
+      height: halfIndex * 2,
+    };
+
+    const prevCanvas = activeCanvas;
+    const prevCtx = ctx;
+    try {
+      tile.width = T;
+      tile.height = T;
+      const tileCtx = tile.getContext("2d");
+      if (!tileCtx) return null;
+      activeCanvas = tile;
+      ctx = tileCtx;
+      tileCtx.setTransform(1, 0, 0, 1, 0, 0);
+      // 观片台是无限白色底板：索引边界外仍保持白色，让镜片可自由越过边缘。
+      tileCtx.fillStyle = "#ffffff";
+      tileCtx.fillRect(0, 0, T, T);
+      tileCtx.setTransform(G, 0, 0, G, T / 2 - centerIndexX * G, T / 2 - centerIndexY * G);
+      tileCtx.save();
+      tileCtx.beginPath();
+      tileCtx.rect(0, 0, layout.canvasW, layout.canvasH);
+      tileCtx.clip();
+      paintIndex(items, options, layout, { cullRect, buildHitData: false });
+      tileCtx.restore();
+    } finally {
+      activeCanvas = prevCanvas;
+      ctx = prevCtx;
+    }
+    return tile;
+  }
+
+  function loupeViewportCenter() {
+    return { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 };
+  }
+
+  function drawLoupeFrame() {
+    state.lightTable.rafId = 0;
+    if (!state.lightTable.active) {
+      hideLoupe();
+      return;
+    }
+    const focus = state.lightTable.focusMode;
+    const rect = previewCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      hideLoupe();
+      return;
+    }
+
+    // 采样中心（client 坐标）与镜片显示位置（client 坐标）
+    let sampleClient;
+    let lensClient;
+    if (focus) {
+      sampleClient = loupeViewportCenter();
+      lensClient = sampleClient;
+    } else {
+      const pointer = state.lightTable.pointer;
+      if (!pointer || state.canvasDrag?.mode === "light-pan") {
+        hideLoupe();
+        return;
+      }
+      sampleClient = pointer;
+      lensClient = pointer;
+    }
+
+    // canvasPoint 允许返回索引边界外坐标；tile 渲染器会以无限白色底板补齐。
+    const point = canvasPoint(sampleClient, rect);
+    state.lightTable.samplePoint = point;
+
+    // 命中帧仅用于远程原图按需水合；空白/齿孔/边字区域也照常显示放大内容。
+    const hit = hitFrame(point);
+    const item = hit?.item || null;
+    const previousItemId = state.lightTable.activeItemId;
+    state.lightTable.activeItemId = item ? item.id : null;
+    if (item && previousItemId !== item.id) scheduleOriginalForLoupe(item);
+
+    const tile = renderLoupeTile(point.x, point.y);
+    const drawn = tile && loupeRenderer.draw({ tile });
+    if (!drawn) {
+      hideLoupe();
+      return;
+    }
+
+    opticalLoupe.style.setProperty("--loupe-x", `${lensClient.clientX}px`);
+    opticalLoupe.style.setProperty("--loupe-y", `${lensClient.clientY}px`);
+    opticalLoupe.classList.add("is-visible");
+    previewWrap.classList.add("has-optical-loupe");
+    if (item?.remote?.quality === "loading") opticalLoupe.classList.add("is-hydrating");
+    else opticalLoupe.classList.remove("is-hydrating");
+  }
+
+  function scheduleLoupeFrame() {
+    if (!state.lightTable.active || state.lightTable.rafId) return;
+    state.lightTable.rafId = requestAnimationFrame(drawLoupeFrame);
+  }
 
   exportButton.addEventListener("click", () => {
     if (!state.items.length) return;
@@ -569,9 +1107,12 @@
       showNotice("请先取消当前导出，再清空照片");
       return;
     }
+    if (state.lightTable.active) exitLightTable({ restoreFocus: false });
     state.reprocessGeneration += 1;
     state.items.forEach(releaseItem);
     state.items = [];
+    normalizeBackgroundSelection();
+    updateBackgroundControls();
     render();
     renderPhotoList();
   });
@@ -580,32 +1121,81 @@
 
   previewCanvas.addEventListener("pointerdown", onCanvasPointerDown);
   previewCanvas.addEventListener("pointermove", onCanvasPointerMove);
+  previewCanvas.addEventListener("pointerenter", onCanvasPointerEnter);
+  previewCanvas.addEventListener("pointerleave", onCanvasPointerLeave);
   previewCanvas.addEventListener("pointerup", onCanvasPointerUp);
-  previewCanvas.addEventListener("pointercancel", cancelCanvasDrag);
+  previewCanvas.addEventListener("pointercancel", onCanvasPointerCancel);
   previewCanvas.addEventListener("contextmenu", onCanvasContextMenu);
 
-  function canvasPoint(event) {
-    const rect = previewCanvas.getBoundingClientRect();
+  function onCanvasPointerEnter(event) {
+    if (!state.lightTable.active || event.pointerType === "touch") return;
+    state.lightTable.pointer = { clientX: event.clientX, clientY: event.clientY };
+    scheduleLoupeFrame();
+  }
+
+  function resetLoupeTarget({ clearPointer = true } = {}) {
+    clearFocusMode();
+    clearTimeout(state.lightTable.hydrationTimer);
+    state.lightTable.hydrationTimer = 0;
+    state.lightTable.hydrationRequestId += 1;
+    state.lightTable.activeItemId = null;
+    if (clearPointer) state.lightTable.pointer = null;
+    hideLoupe();
+  }
+
+  function onCanvasPointerLeave(event) {
+    if (!state.lightTable.active || event.pointerType === "touch") return;
+    // Canvas 之外仍是无限白色观片台；仅离开整个 previewWrap 时才清理镜片。
+    if (previewWrap.contains(event.relatedTarget)) return;
+    if (state.lightTable.focusMode) return;
+    resetLoupeTarget();
+  }
+
+  function canvasPoint(event, canvasRect = null) {
+    const rect = canvasRect || previewCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return { x: 0, y: 0 };
     return {
-      x: (event.clientX - rect.left) / state.previewZoom,
-      y: (event.clientY - rect.top) / state.previewZoom,
+      x: (event.clientX - rect.left) * (previewCanvas.width / rect.width),
+      y: (event.clientY - rect.top) * (previewCanvas.height / rect.height),
     };
   }
 
   function hitFrame(point) {
-    return state.frameRects.find((frame) =>
-      frame.regions.some(
+    return state.frameRects.find((frame) => {
+      const bounds = frame.bounds;
+      if (
+        point.x < bounds.x || point.x > bounds.x + bounds.w ||
+        point.y < bounds.y || point.y > bounds.y + bounds.h
+      ) {
+        return false;
+      }
+      return frame.regions.some(
         (region) =>
           point.x >= region.x &&
           point.x <= region.x + region.w &&
           point.y >= region.y &&
           point.y <= region.y + region.h,
-      ),
-    );
+      );
+    });
   }
 
   function onCanvasPointerDown(event) {
     if (event.button !== 0 || !state.items.length) return;
+    if (state.lightTable.active) {
+      state.canvasDrag = {
+        mode: "light-pending",
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: previewWrap.scrollLeft,
+        scrollTop: previewWrap.scrollTop,
+      };
+      previewCanvas.setPointerCapture(event.pointerId);
+      if (event.pointerType !== "touch") hideLoupe();
+      event.preventDefault();
+      return;
+    }
     const hit = hitFrame(canvasPoint(event));
     state.canvasDrag = {
       mode: hit ? "pending" : "pan",
@@ -624,6 +1214,27 @@
 
   function onCanvasPointerMove(event) {
     const drag = state.canvasDrag;
+    if (state.lightTable.active) {
+      if (!drag) {
+        if (event.pointerType === "touch") return;
+        state.lightTable.pointer = { clientX: event.clientX, clientY: event.clientY };
+        if (state.lightTable.focusMode) panFocusedBackground(event);
+        scheduleLoupeFrame();
+        return;
+      }
+      if (event.pointerId !== drag.pointerId) return;
+      const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+      if (drag.mode === "light-pending" && moved >= 6) {
+        drag.mode = "light-pan";
+        previewWrap.classList.add("is-panning");
+        resetLoupeTarget({ clearPointer: event.pointerType === "touch" });
+      }
+      if (drag.mode === "light-pan") {
+        previewWrap.scrollLeft = drag.scrollLeft - (event.clientX - drag.startX);
+        previewWrap.scrollTop = drag.scrollTop - (event.clientY - drag.startY);
+      }
+      return;
+    }
     if (!drag || event.pointerId !== drag.pointerId) return;
 
     if (drag.mode === "pan") {
@@ -657,6 +1268,20 @@
   function onCanvasPointerUp(event) {
     const drag = state.canvasDrag;
     if (!drag || event.pointerId !== drag.pointerId) return;
+    if (state.lightTable.active) {
+      const wasTap = drag.mode === "light-pending";
+      const pointerType = drag.pointerType;
+      cancelCanvasDrag();
+      if (wasTap) {
+        const pointer = { clientX: event.clientX, clientY: event.clientY };
+        state.lightTable.pointer = pointer;
+        toggleFocusMode(pointer);
+      } else if (pointerType !== "touch" && !state.lightTable.focusMode) {
+        state.lightTable.pointer = { clientX: event.clientX, clientY: event.clientY };
+        scheduleLoupeFrame();
+      }
+      return;
+    }
 
     // 如果是 pending 状态且没有移动过，说明是点击而非拖拽 → 弹出菜单
     if (drag.mode === "pending") {
@@ -676,10 +1301,17 @@
 
   function onCanvasContextMenu(event) {
     event.preventDefault();
+    if (state.lightTable.active) return;
     const hit = hitFrame(canvasPoint(event));
     if (hit) {
       showFrameMenu(hit.id, event.clientX, event.clientY);
     }
+  }
+
+  function onCanvasPointerCancel() {
+    const inLightTable = state.lightTable.active;
+    cancelCanvasDrag();
+    if (inLightTable) resetLoupeTarget();
   }
 
   function cancelCanvasDrag() {
@@ -898,6 +1530,7 @@
   updateFrameModeControls();
   drawEmptyCanvas();
   applyPreviewZoom();
+  syncLightTableControls();
 
   async function readImageFile(file) {
     const [originalSource, taken] = await Promise.all([
@@ -1046,7 +1679,9 @@
             sourceGeneration: 0,
           };
           let rebuilt = false;
+          let itemSourceGeneration = item.sourceGeneration;
           while (!rebuilt && !controller.signal.aborted) {
+            itemSourceGeneration = item.sourceGeneration;
             candidate.cropRect = item.cropRect ? { ...item.cropRect } : null;
             candidate.manualTurns = item.manualTurns;
             candidate.editVersion = item.editVersion + 1;
@@ -1059,7 +1694,10 @@
             candidate.sourceGeneration = 0;
             state.reprocessGeneration += 1;
             rebuilt = await rebuildItemSource(candidate, candidate.editVersion);
-            if (rebuilt && item.editVersion + 1 !== candidate.editVersion) {
+            if (
+              rebuilt &&
+              (item.editVersion + 1 !== candidate.editVersion || item.sourceGeneration !== itemSourceGeneration)
+            ) {
               closeDistinctSources(
                 candidate.source === fullSource ? null : candidate.source,
                 candidate.editSource === fullSource ? null : candidate.editSource,
@@ -1072,7 +1710,8 @@
             controller.signal.aborted ||
             remote.revision !== revision ||
             !state.items.includes(item) ||
-            item.editVersion + 1 !== candidate.editVersion
+            item.editVersion + 1 !== candidate.editVersion ||
+            item.sourceGeneration !== itemSourceGeneration
           ) {
             closeDistinctSources(candidate.source, candidate.editSource, fullSource);
             fullSource = null;
@@ -1464,6 +2103,47 @@
     });
   }
 
+  function getBackgroundItem(items = getSortedItems(), itemId = state.backgroundItemId) {
+    if (!items.length) return null;
+    return items.find((item) => item.id === itemId) || items[0];
+  }
+
+  function normalizeBackgroundSelection() {
+    if (!state.items.length) {
+      state.backgroundItemId = null;
+      return null;
+    }
+    if (state.backgroundItemId !== null && !state.items.some((item) => item.id === state.backgroundItemId)) {
+      state.backgroundItemId = null;
+    }
+    return getBackgroundItem();
+  }
+
+  function updateBackgroundControls() {
+    const enabled = backgroundStyle.value === "blur";
+    backgroundBlur.disabled = !enabled || state.isExporting;
+    backgroundBlurField.classList.toggle("is-disabled", !enabled);
+    backgroundBlurValue.value = `${backgroundBlur.value} px`;
+    const item = getBackgroundItem();
+    backgroundHint.textContent = item
+      ? `当前背景：${item.name}；点击单帧可更换`
+      : "默认使用首图；点击单帧可将其设为背景";
+  }
+
+  function setBackgroundItem(itemId) {
+    const item = state.items.find((entry) => entry.id === itemId);
+    if (!item) return;
+    state.backgroundItemId = item.id;
+    backgroundStyle.value = "blur";
+    updateBackgroundControls();
+    render();
+    showNotice(`已将 ${item.name} 设为虚化背景`);
+  }
+
+  backgroundStyle.addEventListener("change", updateBackgroundControls);
+  backgroundBlur.addEventListener("input", updateBackgroundControls);
+  updateBackgroundControls();
+
   // 控件高频输入时防抖，避免每个 input 事件都全量重绘
   function scheduleRender() {
     window.clearTimeout(state.renderTimer);
@@ -1486,6 +2166,8 @@
     emptyState.classList.add("is-hidden");
     previewWrap.classList.remove("is-empty", "is-loading");
     exportButton.disabled = state.isExporting && !state.exportHydrationItems;
+    if (state.lightTable.active) state.lightTable.sortedItems = items;
+    syncLightTableControls();
     applyPreviewZoom();
   }
 
@@ -1628,17 +2310,30 @@
     const scanlines = new Uint8Array(rowBytes * bandHeight);
     const previousCanvas = activeCanvas;
     const previousCtx = ctx;
+    const blurBleed = options.backgroundEnabled
+      ? Math.ceil(options.backgroundBlurPx * 3 + 2)
+      : 0;
     for (let x = 0; x < layout.canvasW; x += EXPORT_TILE_SIDE) {
       if (state.exportCancelled) throw new DOMException("Export cancelled", "AbortError");
       const tileWidth = Math.min(EXPORT_TILE_SIDE, layout.canvasW - x);
+      const renderX = Math.max(0, x - blurBleed);
+      const renderY = Math.max(0, bandY - blurBleed);
+      const renderRight = Math.min(layout.canvasW, x + tileWidth + blurBleed);
+      const renderBottom = Math.min(layout.canvasH, bandY + bandHeight + blurBleed);
+      const renderBounds = {
+        x: renderX,
+        y: renderY,
+        width: renderRight - renderX,
+        height: renderBottom - renderY,
+      };
       const canvas = document.createElement("canvas");
       const tileCtx = canvas.getContext("2d", { willReadFrequently: true });
       if (!tileCtx) throw new Error("Canvas 2D context unavailable");
       activeCanvas = canvas;
       ctx = tileCtx;
       try {
-        drawLayout(items, options, layout, { x, y: bandY, width: tileWidth, height: bandHeight });
-        const pixels = tileCtx.getImageData(0, 0, tileWidth, bandHeight);
+        drawLayout(items, options, layout, renderBounds);
+        const pixels = tileCtx.getImageData(x - renderX, bandY - renderY, tileWidth, bandHeight);
         copyTileToScanlines(pixels, scanlines, layout.canvasW, x, tileWidth, bandHeight);
       } finally {
         activeCanvas = previousCanvas;
@@ -1751,6 +2446,8 @@
   function setSourceEditingLocked(locked) {
     frameAspect.disabled = locked;
     wideSpecSelect.disabled = locked || !is135WideFormat();
+    backgroundStyle.disabled = locked;
+    backgroundBlur.disabled = locked || backgroundStyle.value !== "blur";
     halfFrameModeInputs.forEach((control) => {
       control.disabled = locked || frameAspect.value !== "half";
     });
@@ -1993,6 +2690,8 @@
       imageInSprockets: isWide135 && imageInSprockets.checked,
       imageInEdgeText: isWide135 && imageInEdgeText.checked,
       showLeader: showLeader.checked && !is120,
+      backgroundEnabled: backgroundStyle.value === "blur",
+      backgroundBlurPx: clamp(Number(backgroundBlur.value) || 24, 8, 64) * scale,
       leaderW: baseFrameW + normalGap,
       leaderAdvance,
       stock,
@@ -2064,6 +2763,40 @@
     return getOriginalRowX(rowIndex) + groupOffset;
   }
 
+  // 绘制体：假定调用方已设好 ctx 变换。cullRect 为当前坐标空间内的可见区域（用于背景填充与整行剔除）。
+  function paintIndex(items, options, layout, { cullRect, buildHitData }) {
+    drawSheetBackground(layout.canvasW, layout.canvasH, cullRect, state.lightTable.active);
+    if (options.backgroundEnabled && !state.lightTable.active) {
+      const backgroundItem = getBackgroundItem(items);
+      if (backgroundItem) {
+        FilmFrame135.drawBlurredPhotoBackground(
+          ctx,
+          backgroundItem.source,
+          backgroundItem.width,
+          backgroundItem.height,
+          { x: 0, y: 0, w: layout.canvasW, h: layout.canvasH },
+          options.backgroundBlurPx,
+          { x: cullRect.x, y: cullRect.y, w: cullRect.width, h: cullRect.height },
+        );
+      }
+    }
+
+    if (buildHitData) state.frameRects = [];
+
+    layout.rows.forEach((rowInfo, row) => {
+      const y = options.sheetPad + row * (layout.stripH + options.rowGap);
+      const shadowPad = options.frameW * 0.08;
+      if (y + layout.stripH + shadowPad < cullRect.y || y - shadowPad > cullRect.y + cullRect.height) return;
+      const rowItems = items.slice(rowInfo.start, rowInfo.start + rowInfo.count);
+      const x = getRowX(layout, row, options);
+      drawFilmRow(rowItems, rowInfo, x, y, layout, row, options, buildHitData);
+    });
+
+    if (buildHitData && state.dropIndex !== null) {
+      drawDropIndicator(layout, options);
+    }
+  }
+
   function drawLayout(items, options, layout, tile = null) {
     const isPreview = activeCanvas === previewCanvas;
     const bounds = tile || { x: 0, y: 0, width: layout.canvasW, height: layout.canvasH };
@@ -2073,22 +2806,7 @@
     ctx.clearRect(0, 0, bounds.width, bounds.height);
     ctx.save();
     ctx.translate(-bounds.x, -bounds.y);
-    drawSheetBackground(layout.canvasW, layout.canvasH, bounds);
-
-    if (isPreview) state.frameRects = [];
-
-    layout.rows.forEach((rowInfo, row) => {
-      const y = options.sheetPad + row * (layout.stripH + options.rowGap);
-      const shadowPad = options.frameW * 0.08;
-      if (y + layout.stripH + shadowPad < bounds.y || y - shadowPad > bounds.y + bounds.height) return;
-      const rowItems = items.slice(rowInfo.start, rowInfo.start + rowInfo.count);
-      const x = getRowX(layout, row, options);
-      drawFilmRow(rowItems, rowInfo, x, y, layout, row, options, isPreview);
-    });
-
-    if (isPreview && state.dropIndex !== null) {
-      drawDropIndicator(layout, options);
-    }
+    paintIndex(items, options, layout, { cullRect: bounds, buildHitData: isPreview });
     ctx.restore();
   }
 
@@ -2097,9 +2815,10 @@
     drawLayout(items, options, layout);
   }
 
-  function drawSheetBackground(width, height, bounds = { x: 0, y: 0, width, height }) {
-    ctx.fillStyle = "#f7f1e6";
+  function drawSheetBackground(width, height, bounds = { x: 0, y: 0, width, height }, lightTable = false) {
+    ctx.fillStyle = lightTable ? "#ffffff" : "#f7f1e6";
     ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    if (lightTable) return;
     ctx.fillStyle = "rgba(45, 40, 32, 0.035)";
     const firstStripe = Math.ceil(bounds.y / 18) * 18;
     for (let y = firstStripe; y < bounds.y + bounds.height; y += 18) {
@@ -2138,8 +2857,11 @@
       if (isPreview) {
         state.frameRects.push({
           id: item.id,
+          item,
+          central: geometry.central,
           regions: geometry.regions,
           bounds: geometry.bounds,
+          continuous: geometry.continuous,
         });
       }
     });
@@ -2465,6 +3187,8 @@
     state.reprocessGeneration += 1;
     releaseItem(state.items[index]);
     state.items.splice(index, 1);
+    normalizeBackgroundSelection();
+    updateBackgroundControls();
     render();
     renderPhotoList();
   }
@@ -2502,12 +3226,13 @@
     statusTitle.textContent = "等待导入扫描件";
     imageCounter.textContent = "0 张";
     exportButton.disabled = true;
+    syncLightTableControls();
     applyPreviewZoom();
   }
 
-  function setPreviewZoom(value) {
-    state.previewZoom = clamp(value, 0.25, 2);
-    zoomRange.value = Math.round(state.previewZoom * 100);
+  function setPreviewZoom(value, minimum = 0.25, syncControl = true) {
+    state.previewZoom = clamp(value, minimum, 2);
+    if (syncControl) zoomRange.value = Math.round(state.previewZoom * 100);
     applyPreviewZoom();
   }
 
@@ -2556,11 +3281,17 @@
     const itemIndex = items.findIndex((item) => item.id === itemId);
     if (itemIndex < 0) return null;
     const renderOptions = getRenderOptions(1);
+    const backgroundItem = renderOptions.backgroundEnabled ? getBackgroundItem(items) : null;
     return {
       item: items[itemIndex],
       itemId,
       frameNumber: itemIndex + 1,
       editVersion: items[itemIndex].editVersion,
+      backgroundEnabled: renderOptions.backgroundEnabled,
+      backgroundBlurPx: renderOptions.backgroundBlurPx,
+      backgroundItem,
+      backgroundItemId: backgroundItem?.id ?? null,
+      backgroundEditVersion: backgroundItem?.editVersion ?? null,
       formatId: getCurrentSingleFrameFormatId(),
       inputMode: getHalfFrameInputMode(),
       baseSlotW: renderOptions.slotW,
@@ -2644,6 +3375,17 @@
     } else {
       outputCtx.clearRect(0, 0, canvas.width, canvas.height);
     }
+    if (snapshot.backgroundEnabled && snapshot.backgroundItem) {
+      FilmFrame135.drawBlurredPhotoBackground(
+        outputCtx,
+        snapshot.backgroundItem.source,
+        snapshot.backgroundItem.width,
+        snapshot.backgroundItem.height,
+        { x: 0, y: 0, w: canvas.width, h: canvas.height },
+        snapshot.backgroundBlurPx * scale,
+        { x: 0, y: 0, w: canvas.width, h: canvas.height },
+      );
+    }
     FilmFrame.renderSingleFrameInBounds(outputCtx, snapshot.item, options, bounds);
     return { canvas, options, bounds };
   }
@@ -2696,6 +3438,7 @@
   }
 
   function openFrameExportModal(itemId, opener) {
+    if (state.lightTable.active) exitLightTable({ restoreFocus: false });
     if (state.isExporting) {
       showNotice("请先取消当前导出，再导出单帧");
       return;
@@ -2719,6 +3462,9 @@
     if (snapshot?.busy) {
       snapshot.cancelled = true;
       snapshot.item.remote?.abortController?.abort();
+      if (snapshot.backgroundItem !== snapshot.item) {
+        snapshot.backgroundItem?.remote?.abortController?.abort();
+      }
       frameExportStatus.textContent = "正在取消单帧导出…";
       return;
     }
@@ -2747,6 +3493,11 @@
 
   function showFrameMenu(itemId, clientX, clientY) {
     state.contextItemId = itemId;
+    const backgroundButton = frameMenu.querySelector('[data-action="set-background"]');
+    if (backgroundButton) {
+      const selected = getBackgroundItem()?.id === itemId;
+      backgroundButton.setAttribute("aria-checked", String(selected));
+    }
     frameMenu.hidden = false;
 
     // 先设置菜单位置在点击处，如果超出视口再调整
@@ -2789,6 +3540,9 @@
           break;
         case "insert":
           insertBeforeItem(itemId);
+          break;
+        case "set-background":
+          setBackgroundItem(itemId);
           break;
         case "export-frame":
           openFrameExportModal(itemId, opener);
@@ -2836,12 +3590,24 @@
     updateFrameExportControls();
 
     try {
-      await ensureOriginal(item, "单帧导出");
-      if (snapshot.cancelled) throw new DOMException("Aborted", "AbortError");
+      const hydrationItems = [item];
+      if (snapshot.backgroundEnabled && snapshot.backgroundItem && snapshot.backgroundItem !== item) {
+        hydrationItems.push(snapshot.backgroundItem);
+      }
+      for (const hydrationItem of hydrationItems) {
+        await ensureOriginal(hydrationItem, "单帧导出");
+        if (snapshot.cancelled) throw new DOMException("Aborted", "AbortError");
+      }
       if (!state.items.includes(item)) {
         throw new Error("FRAME_EXPORT_SOURCE_CHANGED");
       }
       snapshot.editVersion = item.editVersion;
+      if (snapshot.backgroundEnabled) {
+        const backgroundItem = state.items.find((entry) => entry.id === snapshot.backgroundItemId);
+        if (!backgroundItem) throw new Error("FRAME_EXPORT_SOURCE_CHANGED");
+        snapshot.backgroundItem = backgroundItem;
+        snapshot.backgroundEditVersion = backgroundItem.editVersion;
+      }
       frameExportApply.textContent = "正在导出…";
       frameExportStatus.textContent = "正在绘制片基单帧";
       const scale = getFrameExportScale(snapshot);
@@ -2907,7 +3673,22 @@
       } else if (!cropModal.hidden) {
         event.preventDefault();
         closeCropModal();
+      } else if (state.lightTable.active) {
+        event.preventDefault();
+        exitLightTable();
       }
+      return;
+    }
+    if (
+      event.key.toLowerCase() === "f" &&
+      !event.repeat &&
+      !event.ctrlKey && !event.altKey && !event.metaKey &&
+      !hasOpenModal() &&
+      !state.isExporting &&
+      !event.target.closest("input, select, textarea, button, a, [contenteditable='true']")
+    ) {
+      event.preventDefault();
+      toggleLightTable();
       return;
     }
     if (event.key !== "Tab") return;
@@ -2939,9 +3720,29 @@
     }
   });
 
-  previewWrap.addEventListener("scroll", hideFrameMenu, { passive: true });
+  previewWrap.addEventListener("scroll", () => {
+    hideFrameMenu();
+    if (state.lightTable.active && state.lightTable.pointer) scheduleLoupeFrame();
+  }, { passive: true });
   window.addEventListener("scroll", hideFrameMenu, { passive: true });
-  window.addEventListener("resize", hideFrameMenu);
+  window.addEventListener("resize", () => {
+    hideFrameMenu();
+    if (!state.lightTable.active || state.lightTable.resizeRafId) return;
+    const anchor = currentLightTableAnchor();
+    state.lightTable.resizeRafId = requestAnimationFrame(() => {
+      state.lightTable.resizeRafId = 0;
+      if (!state.lightTable.active) return;
+      const target = state.lightTable.focusMode ? loupeViewportCenter() : (state.lightTable.pointer || previewViewportCenter());
+      if (anchor) {
+        anchor.clientX = target.clientX;
+        anchor.clientY = target.clientY;
+      }
+      resizeLoupe();
+      if (state.lightTable.focusMode) restoreCanvasAnchor(anchor);
+      else fitLightTableToViewport(anchor);
+      scheduleLoupeFrame();
+    });
+  });
 
   // 点击菜单外关闭
   document.addEventListener("pointerdown", (event) => {
@@ -2952,14 +3753,27 @@
 
   // ---- 裁切工具：交互式裁切框 ----
 
-  function openCropModal(itemId) {
+  async function openCropModal(itemId) {
+    if (state.lightTable.active) exitLightTable({ restoreFocus: false });
     if (state.isExporting) {
       showNotice("请先取消当前导出，再裁切照片");
       return;
     }
     const requestGeneration = ++state.cropRequestGeneration;
     const item = state.items.find((entry) => entry.id === itemId);
-    if (!item || requestGeneration !== state.cropRequestGeneration) return;
+    if (!item) return;
+    try {
+      await ensureOriginal(item, "裁切照片");
+    } catch (error) {
+      if (error.name !== "AbortError") showNotice("原图获取失败，无法打开裁切工具");
+      return;
+    }
+    if (
+      requestGeneration !== state.cropRequestGeneration ||
+      !state.items.includes(item)
+    ) {
+      return;
+    }
 
     cropModal.hidden = false;
     document.body.style.overflow = "hidden";
@@ -3390,6 +4204,8 @@
       // 追加而非覆盖，支持分批导入
       state.items.push(...succeeded);
     }
+    normalizeBackgroundSelection();
+    updateBackgroundControls();
 
     const messages = [];
     if (skipped) messages.push(`跳过了 ${skipped} 个不支持的文件（仅支持 JPG / PNG / WebP）`);

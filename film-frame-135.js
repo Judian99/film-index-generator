@@ -95,14 +95,59 @@
     });
   }
 
+  function getCoverPlacement(sourceWidth, sourceHeight, central) {
+    if (
+      !Number.isFinite(sourceWidth) ||
+      !Number.isFinite(sourceHeight) ||
+      sourceWidth <= 0 ||
+      sourceHeight <= 0 ||
+      !central ||
+      central.w <= 0 ||
+      central.h <= 0
+    ) {
+      return null;
+    }
+    const scale = Math.max(central.w / sourceWidth, central.h / sourceHeight);
+    const drawW = sourceWidth * scale;
+    const drawH = sourceHeight * scale;
+    return {
+      scale,
+      drawX: central.x + (central.w - drawW) / 2,
+      drawY: central.y + (central.h - drawH) / 2,
+      drawW,
+      drawH,
+    };
+  }
+
+  function drawBlurredPhotoBackground(ctx, source, sourceWidth, sourceHeight, destination, blurPx = 0, clipRect = destination) {
+    if (!source || !destination || !clipRect) return false;
+    const blur = Math.max(0, Number(blurPx) || 0);
+    const overscan = Math.ceil(blur * 3 + 2);
+    const expanded = {
+      x: destination.x - overscan,
+      y: destination.y - overscan,
+      w: destination.w + overscan * 2,
+      h: destination.h + overscan * 2,
+    };
+    const placement = getCoverPlacement(sourceWidth, sourceHeight, expanded);
+    if (!placement) return false;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(clipRect.x, clipRect.y, clipRect.w, clipRect.h);
+    ctx.clip();
+    if (blur > 0 && "filter" in ctx) ctx.filter = `blur(${blur}px)`;
+    ctx.drawImage(source, placement.drawX, placement.drawY, placement.drawW, placement.drawH);
+    ctx.restore();
+    return true;
+  }
+
   function drawFrame(ctx, item, x, y, options, drawState = {}) {
     const geometry = getFrameExposureGeometry(x, y, options);
     const { central } = geometry;
-    const scale = Math.max(central.w / item.width, central.h / item.height);
-    const drawW = item.width * scale;
-    const drawH = item.height * scale;
-    const drawX = central.x + (central.w - drawW) / 2;
-    const drawY = central.y + (central.h - drawH) / 2;
+    const placement = getCoverPlacement(item.width, item.height, central);
+    if (!placement) return geometry;
+    const { drawX, drawY, drawW, drawH } = placement;
     const radius = Math.max(2, Math.round(central.w * 0.008));
 
     ctx.save();
@@ -416,6 +461,8 @@
     roundedRect,
     deterministicNoise,
     getFrameExposureGeometry,
+    getCoverPlacement,
+    drawBlurredPhotoBackground,
     addExposurePath,
     drawFrame,
     drawBlankFrame,
