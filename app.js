@@ -73,6 +73,8 @@
   const clearFrameSelectionButton = document.getElementById("clearFrameSelectionButton");
   const batchFrameExportButton = document.getElementById("batchFrameExportButton");
   const frameSelectionCounter = document.getElementById("frameSelectionCounter");
+  const previewToolsEl = document.querySelector(".preview-tools");
+  const frameSelectGroup = document.querySelector(".frame-select-group");
   const lightTableHud = document.getElementById("lightTableHud");
   const lightTableExit = document.getElementById("lightTableExit");
   const lightTableStatus = document.getElementById("lightTableStatus");
@@ -140,6 +142,7 @@
     stockId: null,
     // 帧操作菜单与裁切工具
     contextItemId: null,
+    contextMenuOpener: null,
     backgroundItemId: null,
     cropState: null,
     cropRequestGeneration: 0,
@@ -170,6 +173,13 @@
       session: null,
       sortedItems: null,
       tileCanvas: null,
+    },
+    // 当前工程文件：id/name 在 IndexedDB 中唯一标识一个索引图项目
+    project: {
+      id: null,
+      name: null,
+      saveTimer: null,
+      autoSaveInterval: null,
     },
   };
 
@@ -416,12 +426,19 @@
     if (!state.items.length) setFilmStageState("intro");
   });
 
-  dropZone.addEventListener("drop", (event) => {
+  dropZone.addEventListener("drop", async (event) => {
     event.preventDefault();
     fileDragDepth = 0;
     dropZone.classList.remove("is-dragging");
+    const dtItems = Array.from(event.dataTransfer.items || []);
     const files = Array.from(event.dataTransfer.files || []);
-    loadFiles(files);
+    // 尝试获取文件系统句柄（Chrome/Edge 支持，Firefox 不支持）
+    let handles = [];
+    if (dtItems.length && typeof dtItems[0].getAsFileSystemHandle === "function") {
+      const settled = await Promise.allSettled(dtItems.map((i) => i.getAsFileSystemHandle()));
+      handles = settled.map((r) => (r.status === "fulfilled" ? r.value : null));
+    }
+    loadFiles(files, null, handles);
   });
 
   // 防止文件被拖到 dropZone 之外时浏览器直接打开图片、丢掉当前页面
@@ -612,6 +629,7 @@
   function syncLightTableControls() {
     lightTableButton.disabled = !state.items.length || state.isExporting;
     lightTableButton.setAttribute("aria-pressed", String(state.lightTable.active));
+    setApplicationVisualState();
   }
 
   function setLightTableStatus(message) {
@@ -1206,6 +1224,19 @@
     return changed;
   }
 
+  function setApplicationVisualState(explicitState = null) {
+    let visualState = explicitState;
+    if (!visualState) {
+      if (state.isExporting) visualState = "exporting";
+      else if (state.lightTable.active) visualState = "light-table";
+      else if (!state.items.length) visualState = previewWrap.classList.contains("is-loading") ? "loading" : "empty";
+      else if (state.frameSelectionMode || state.selectedFrameIds.size) visualState = "selecting";
+      else visualState = "ready";
+    }
+    document.body.dataset.appState = visualState;
+    previewWrap.setAttribute("aria-busy", String(visualState === "loading" || visualState === "exporting"));
+  }
+
   function syncFrameSelectionControls() {
     const selectedCount = state.selectedFrameIds.size;
     const hasItems = state.items.length > 0;
@@ -1214,6 +1245,10 @@
     clearFrameSelectionButton.disabled = !selectedCount || state.isExporting;
     batchFrameExportButton.disabled = !selectedCount || state.isExporting;
     frameSelectionCounter.textContent = `已选 ${selectedCount} 帧`;
+    previewWrap.classList.toggle("is-selecting-frame", state.frameSelectionMode);
+    previewToolsEl.classList.toggle("is-selecting", state.frameSelectionMode);
+    frameSelectGroup.setAttribute("aria-hidden", String(!state.frameSelectionMode));
+    setApplicationVisualState();
   }
 
   function selectFrameRange(itemId) {
@@ -1643,7 +1678,7 @@
   applyPreviewZoom();
   syncLightTableControls();
 
-  async function readImageFile(file) {
+  async function readImageFile(file, fileHandle = null) {
     const [originalSource, taken] = await Promise.all([
       decodeImage(file),
       readExifDate(file).catch(() => null),
@@ -1651,6 +1686,7 @@
     const item = {
       id: state.nextId++,
       file,
+      fileHandle,
       originalSource,
       originalWidth: originalSource.width,
       originalHeight: originalSource.height,
@@ -2259,6 +2295,7 @@
   function scheduleRender() {
     window.clearTimeout(state.renderTimer);
     state.renderTimer = window.setTimeout(render, 80);
+    if (state.project.id) scheduleProjectSave();
   }
 
   function render() {
@@ -2508,9 +2545,7 @@
       pngParts.push(createPngChunk("IEND"));
       const blob = new Blob(pngParts, { type: "image/png" });
       if (blob.size > MAX_STREAMED_PNG_BYTES) throw new Error("PNG_FILE_TOO_LARGE");
-      const pagePart = getExportPageFilenamePart(layout.pagePreset);
-      const filename = ["film-index", pagePart, new Date().toISOString().slice(0, 10), "full-resolution"]
-        .filter(Boolean)
+      const filename = ["film-index", new Date().toISOString().slice(0, 10), "full-resolution"]
         .join("-");
       downloadBlob(blob, `${filename}.png`);
       showNotice(`原图级索引图已拼接为一张 ${sizeLabel} 像素的 PNG`);
@@ -2667,9 +2702,7 @@
 
       try {
         const blob = await canvasToBlob(outputCanvas, mimeType, quality);
-        const pagePart = getExportPageFilenamePart();
-        const filename = ["film-index", pagePart, new Date().toISOString().slice(0, 10)]
-          .filter(Boolean)
+        const filename = ["film-index", new Date().toISOString().slice(0, 10)]
           .join("-");
         downloadBlob(blob, `${filename}.${extension}`);
       } catch (error) {
@@ -2697,6 +2730,7 @@
       exportButton.textContent = originalButtonText;
       exportButton.disabled = originalButtonDisabled;
       render();
+      if (state.project.id) saveProject();
     }
   }
 
@@ -3451,8 +3485,13 @@
     if (item.ownsThumbUrl !== false && item.thumbUrl) URL.revokeObjectURL(item.thumbUrl);
   }
 
-  function showNotice(message, duration = 5200) {
+  function showNotice(message, options = 5200) {
+    const config = typeof options === "number" ? { duration: options } : options;
+    const duration = config.duration ?? 5200;
+    const kind = config.kind || "status";
     noticeEl.textContent = message;
+    noticeEl.dataset.kind = kind;
+    noticeEl.setAttribute("role", kind === "error" ? "alert" : "status");
     noticeEl.classList.add("is-visible");
     window.clearTimeout(state.noticeTimer);
     state.noticeTimer = window.setTimeout(() => {
@@ -3812,8 +3851,9 @@
 
   // ---- 帧操作菜单：点击/右键单帧弹出操作选项 ----
 
-  function showFrameMenu(itemId, clientX, clientY) {
+  function showFrameMenu(itemId, clientX, clientY, opener = previewCanvas) {
     state.contextItemId = itemId;
+    state.contextMenuOpener = opener;
     const backgroundButton = frameMenu.querySelector('[data-action="set-background"]');
     if (backgroundButton) {
       const selected = getBackgroundItem()?.id === itemId;
@@ -3839,10 +3879,26 @@
   }
 
   function hideFrameMenu({ restoreFocus = false } = {}) {
+    const opener = state.contextMenuOpener;
     frameMenu.hidden = true;
     state.contextItemId = null;
-    if (restoreFocus) previewCanvas.focus?.();
+    state.contextMenuOpener = null;
+    if (restoreFocus) (opener?.isConnected ? opener : previewCanvas).focus?.();
   }
+
+  frameMenu.addEventListener("keydown", (event) => {
+    const buttons = Array.from(frameMenu.querySelectorAll("button:not([disabled])"));
+    if (!buttons.length) return;
+    const currentIndex = Math.max(0, buttons.indexOf(document.activeElement));
+    let nextIndex = null;
+    if (event.key === "ArrowDown") nextIndex = (currentIndex + 1) % buttons.length;
+    else if (event.key === "ArrowUp") nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = buttons.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    buttons[nextIndex].focus();
+  });
 
   frameMenu.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4045,8 +4101,25 @@
     }
   });
 
+  document.querySelectorAll(".info-icon").forEach((button) => {
+    button.addEventListener("click", () => {
+      const expanded = button.getAttribute("aria-expanded") === "true";
+      document.querySelectorAll(".info-icon[aria-expanded='true']").forEach((other) => {
+        if (other !== button) other.setAttribute("aria-expanded", "false");
+      });
+      button.setAttribute("aria-expanded", String(!expanded));
+    });
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      const openInfo = document.querySelector(".info-icon[aria-expanded='true']");
+      if (openInfo && frameMenu.hidden && exportModal.hidden && frameExportModal.hidden && cropModal.hidden && !state.lightTable.active) {
+        event.preventDefault();
+        openInfo.setAttribute("aria-expanded", "false");
+        openInfo.focus();
+        return;
+      }
       if (!frameMenu.hidden) {
         event.preventDefault();
         hideFrameMenu({ restoreFocus: true });
@@ -4553,7 +4626,7 @@
     fileInput.click();
   }
 
-  async function loadFiles(files, insertBeforeId = null) {
+  async function loadFiles(files, insertBeforeId = null, fileHandles = []) {
     if (state.isExporting) {
       showNotice("请先取消当前导出，再导入照片");
       return;
@@ -4574,10 +4647,19 @@
 
     statusTitle.textContent = "正在读取扫描件...";
     previewWrap.classList.add("is-loading");
+    setApplicationVisualState("loading");
+    showNotice(`正在本地读取 ${imageFiles.length} 张扫描件`, { kind: "progress", duration: 12000 });
     if (!state.items.length) setFilmStageState("reading");
     exportButton.disabled = true;
 
-    const loaded = await Promise.allSettled(imageFiles.map(readImageFile));
+    // 把过滤前的索引对应关系保留，确保 fileHandles[i] 与 imageFiles[i] 对齐
+    const imageFileIndexes = files.reduce((acc, f, i) => {
+      if (/^image\/(jpeg|png|webp)$/.test(f.type)) acc.push(i);
+      return acc;
+    }, []);
+    const loaded = await Promise.allSettled(
+      imageFiles.map((file, i) => readImageFile(file, fileHandles[imageFileIndexes[i]] ?? null))
+    );
     const succeeded = loaded
       .filter((result) => result.status === "fulfilled")
       .map((result) => result.value);
@@ -4601,11 +4683,16 @@
     const messages = [];
     if (skipped) messages.push(`跳过了 ${skipped} 个不支持的文件（仅支持 JPG / PNG / WebP）`);
     if (failed) messages.push(`${failed} 个文件读取失败`);
-    if (messages.length) showNotice(messages.join("；"));
+    if (messages.length) {
+      showNotice(messages.join("；"), { kind: failed ? "warning" : "status" });
+    } else {
+      showNotice(`已导入 ${succeeded.length} 张扫描件`, { kind: "success", duration: 3200 });
+    }
 
     render();
     renderPhotoList();
     await rebuildAllItemSources(true);
+    if (state.project.id) scheduleProjectSave();
   }
 
   // ---- 胶卷型号：数据层 + 自定义型号面板 ----
@@ -5498,6 +5585,7 @@
           render();
           renderPhotoList();
           await rebuildAllItemSources(true);
+          if (state.project.id) scheduleProjectSave();
         }
         this.previewAbortController = null;
         this.closeBrowser();
@@ -5553,4 +5641,444 @@
   // 确保裁切模态框和菜单初始状态为隐藏
   cropModal.hidden = true;
   frameMenu.hidden = true;
+
+  // ============================================================
+  //  项目管理（IndexedDB 持久化）
+  // ============================================================
+
+  let _projectDB = null;
+
+  function initProjectDB() {
+    if (_projectDB) return Promise.resolve(_projectDB);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open("filmIndexDB", 1);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains("projects")) {
+          db.createObjectStore("projects", { keyPath: "id" });
+        }
+      };
+      req.onsuccess = (e) => { _projectDB = e.target.result; resolve(_projectDB); };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function dbTx(storeName, mode, fn) {
+    return initProjectDB().then(
+      (db) =>
+        new Promise((resolve, reject) => {
+          const tx = db.transaction(storeName, mode);
+          const store = tx.objectStore(storeName);
+          const req = fn(store);
+          if (req) {
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          } else {
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          }
+        })
+    );
+  }
+
+  function listProjects() {
+    return initProjectDB().then(
+      (db) =>
+        new Promise((resolve, reject) => {
+          const tx = db.transaction("projects", "readonly");
+          const req = tx.objectStore("projects").getAll();
+          req.onsuccess = () => {
+            const projects = req.result || [];
+            projects.sort((a, b) => b.updatedAt - a.updatedAt);
+            resolve(projects);
+          };
+          req.onerror = () => reject(req.error);
+        })
+    );
+  }
+
+  function generateProjectName() {
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const stock = getActiveStock();
+    const stockLabel = stock ? stock.name : "胶片";
+    return `${dateStr} ${stockLabel}`;
+  }
+
+  function serializeCurrentState() {
+    const halfMode = document.querySelector("input[name='halfFrameMode']:checked");
+    const sortModeInput = document.querySelector("input[name='sortMode']:checked");
+    return {
+      stockId: state.stockId,
+      frameAspect: frameAspect ? frameAspect.value : "135",
+      wideSpec: wideSpecSelect ? wideSpecSelect.value : "",
+      halfMode: halfMode ? halfMode.value : "cropped",
+      columns: columnsSelect ? Number(columnsSelect.value) : 6,
+      manual135Columns: state.manual135Columns,
+      manualHalfColumns: state.manualHalfColumns,
+      showEdgeText: showEdgeText ? showEdgeText.checked : true,
+      showSprockets: showSprockets ? showSprockets.checked : true,
+      imageInSprockets: imageInSprockets ? imageInSprockets.checked : false,
+      imageInEdgeText: imageInEdgeText ? imageInEdgeText.checked : false,
+      showLeader: showLeader ? showLeader.checked : true,
+      backgroundStyle: backgroundStyle ? backgroundStyle.value : "black",
+      backgroundBlur: backgroundBlur ? Number(backgroundBlur.value) : 0,
+      frameWidth: frameWidthInput ? Number(frameWidthInput.value) : 420,
+      format: formatSelect ? formatSelect.value : "png",
+      jpgQuality: jpgQuality ? Number(jpgQuality.value) : 92,
+      sortMode: sortModeInput ? sortModeInput.value : "name",
+      reverseSort: reverseSort ? reverseSort.checked : false,
+    };
+  }
+
+  function serializeItems() {
+    return state.items.map((item, i) => ({
+      id: item.id,
+      name: item.name,
+      modified: item.modified || 0,
+      fileHandle: item.fileHandle || null,
+      file: item.file || null,
+      cropRect: item.cropRect || null,
+      manualTurns: item.manualTurns || 0,
+      autoTurns: item.autoTurns || 0,
+      order: i,
+    }));
+  }
+
+  async function saveProject() {
+    if (!state.project.id) return;
+    const record = {
+      id: state.project.id,
+      name: state.project.name,
+      createdAt: state.project.createdAt || Date.now(),
+      updatedAt: Date.now(),
+      parameters: serializeCurrentState(),
+      items: serializeItems(),
+    };
+    state.project.createdAt = record.createdAt;
+    await dbTx("projects", "readwrite", (store) => store.put(record));
+  }
+
+  function scheduleProjectSave() {
+    window.clearTimeout(state.project.saveTimer);
+    state.project.saveTimer = window.setTimeout(saveProject, 800);
+  }
+
+  function startAutoSave() {
+    stopAutoSave();
+    state.project.autoSaveInterval = window.setInterval(() => {
+      if (state.project.id) saveProject();
+    }, 30000);
+  }
+
+  function stopAutoSave() {
+    if (state.project.autoSaveInterval !== null) {
+      window.clearInterval(state.project.autoSaveInterval);
+      state.project.autoSaveInterval = null;
+    }
+  }
+
+  async function loadProject(id) {
+    const db = await initProjectDB();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction("projects", "readonly").objectStore("projects").get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function deleteProject(id) {
+    await dbTx("projects", "readwrite", (store) => store.delete(id));
+  }
+
+  // 还原 DOM 控件值，不触发 scheduleRender
+  function restoreParameters(params) {
+    if (!params) return;
+    if (frameAspect && params.frameAspect) frameAspect.value = params.frameAspect;
+    if (wideSpecSelect && params.wideSpec) wideSpecSelect.value = params.wideSpec;
+    if (params.halfMode) {
+      const halfInput = document.querySelector(`input[name='halfFrameMode'][value='${params.halfMode}']`);
+      if (halfInput) halfInput.checked = true;
+    }
+    if (columnsSelect && params.columns) columnsSelect.value = String(params.columns);
+    if (typeof params.manual135Columns === "number") state.manual135Columns = params.manual135Columns;
+    if (typeof params.manualHalfColumns === "number") state.manualHalfColumns = params.manualHalfColumns;
+    if (showEdgeText && typeof params.showEdgeText === "boolean") showEdgeText.checked = params.showEdgeText;
+    if (showSprockets && typeof params.showSprockets === "boolean") showSprockets.checked = params.showSprockets;
+    if (imageInSprockets && typeof params.imageInSprockets === "boolean") imageInSprockets.checked = params.imageInSprockets;
+    if (imageInEdgeText && typeof params.imageInEdgeText === "boolean") imageInEdgeText.checked = params.imageInEdgeText;
+    if (showLeader && typeof params.showLeader === "boolean") showLeader.checked = params.showLeader;
+    if (backgroundStyle && params.backgroundStyle) backgroundStyle.value = params.backgroundStyle;
+    if (backgroundBlur && typeof params.backgroundBlur === "number") backgroundBlur.value = String(params.backgroundBlur);
+    if (frameWidthInput && typeof params.frameWidth === "number") frameWidthInput.value = String(params.frameWidth);
+    if (formatSelect && params.format) formatSelect.value = params.format;
+    if (jpgQuality && typeof params.jpgQuality === "number") jpgQuality.value = String(params.jpgQuality);
+    if (params.sortMode) setSortMode(params.sortMode);
+    if (reverseSort && typeof params.reverseSort === "boolean") reverseSort.checked = params.reverseSort;
+    if (params.stockId) {
+      state.stockId = params.stockId;
+      if (typeof renderStockSelect === "function") renderStockSelect();
+    }
+    updateBackgroundControls();
+    updateExportFormatControls();
+    updateFrameModeControls();
+  }
+
+  // 用 fileHandle 或直接保存的 File 对象重新读取每张图片
+  async function rehydrateItems(savedItems) {
+    const results = [];
+    for (const saved of savedItems) {
+      const handle = saved.fileHandle;
+      try {
+        let file = null;
+        if (handle) {
+          // 拖拽导入的文件：通过文件系统句柄重新获取
+          let perm = await handle.queryPermission({ mode: "read" });
+          if (perm !== "granted") {
+            perm = await handle.requestPermission({ mode: "read" });
+          }
+          if (perm !== "granted") {
+            results.push({ saved, ok: false });
+            continue;
+          }
+          file = await handle.getFile();
+        } else if (saved.file instanceof File) {
+          // 点击导入的文件：直接使用 IndexedDB 中保存的 File 对象
+          file = saved.file;
+        } else {
+          results.push({ saved, ok: false });
+          continue;
+        }
+        const item = await readImageFile(file, handle || null);
+        // 还原裁剪和旋转
+        item.manualTurns = saved.manualTurns || 0;
+        item.autoTurns = saved.autoTurns || 0;
+        if (saved.cropRect) {
+          item.cropRect = saved.cropRect;
+          item.editVersion++;
+          await rebuildItemSource(item, item.editVersion);
+        }
+        results.push({ saved, ok: true, item });
+      } catch (err) {
+        results.push({ saved, ok: false });
+      }
+    }
+    return results;
+  }
+
+  async function openProject(id) {
+    hideWelcomeScreen();
+    const record = await loadProject(id);
+    if (!record) {
+      showNotice("找不到该项目记录");
+      showWelcomeScreen();
+      return;
+    }
+
+    // 清空当前状态
+    state.items.forEach((item) => {
+      if (item.ownsThumbUrl) URL.revokeObjectURL(item.thumbUrl);
+    });
+    state.items = [];
+    state.nextId = 1;
+    state.project.id = record.id;
+    state.project.name = record.name;
+    state.project.createdAt = record.createdAt;
+    updateProjectNameDisplay();
+    drawEmptyCanvas();
+    setFilmStageState("intro");
+
+    // 还原参数
+    restoreParameters(record.parameters);
+
+    // 重新读取图片文件
+    if (record.items && record.items.length) {
+      statusTitle.textContent = "正在恢复扫描件...";
+      previewWrap.classList.add("is-loading");
+      showNotice(`正在从本地路径读取 ${record.items.length} 张扫描件`, { kind: "progress", duration: 15000 });
+
+      const rehydrated = await rehydrateItems(record.items);
+      const succeeded = rehydrated.filter((r) => r.ok).map((r) => r.item);
+      const missing = rehydrated.filter((r) => !r.ok).length;
+
+      // 按保存的 order 排序
+      const orderMap = Object.fromEntries(record.items.map((s, i) => [s.name + s.modified, s.order ?? i]));
+      succeeded.sort((a, b) => {
+        const ka = a.name + (a.modified || 0);
+        const kb = b.name + (b.modified || 0);
+        return (orderMap[ka] ?? 0) - (orderMap[kb] ?? 0);
+      });
+
+      state.items.push(...succeeded);
+
+      if (missing > 0) {
+        showNotice(`已恢复 ${succeeded.length} 张；${missing} 张文件找不到（可能已移动或删除）`, { kind: "warning" });
+      } else if (succeeded.length > 0) {
+        showNotice(`已恢复项目，共 ${succeeded.length} 张`, { kind: "success", duration: 3000 });
+      }
+
+      render();
+      renderPhotoList();
+      await rebuildAllItemSources(true);
+    } else {
+      render();
+    }
+    startAutoSave();
+  }
+
+  function updateProjectNameDisplay() {
+    const el = document.getElementById("projectName");
+    if (el) el.textContent = state.project.name || "—";
+  }
+
+  function startNewProject() {
+    // 清空旧状态
+    state.items.forEach((item) => {
+      if (item.ownsThumbUrl) URL.revokeObjectURL(item.thumbUrl);
+    });
+    state.items = [];
+    state.nextId = 1;
+    state.project.id = crypto.randomUUID();
+    state.project.name = generateProjectName();
+    state.project.createdAt = Date.now();
+    updateProjectNameDisplay();
+    hideWelcomeScreen();
+    drawEmptyCanvas();
+    setFilmStageState("intro");
+    render();
+    startAutoSave();
+  }
+
+  function showWelcomeScreen() {
+    const el = document.getElementById("welcomeScreen");
+    if (el) el.hidden = false;
+    document.querySelector(".app-shell")?.classList.add("is-hidden-behind-welcome");
+  }
+
+  function hideWelcomeScreen() {
+    const el = document.getElementById("welcomeScreen");
+    if (el) el.hidden = true;
+    document.querySelector(".app-shell")?.classList.remove("is-hidden-behind-welcome");
+  }
+
+  function formatRelativeTime(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60000) return "刚刚";
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
+    if (diff < 86400000 * 7) return `${Math.floor(diff / 86400000)} 天前`;
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function renderProjectCards(projects) {
+    const list = document.getElementById("projectList");
+    if (!list) return;
+    list.innerHTML = "";
+    if (!projects.length) return;
+
+    projects.forEach((project) => {
+      const card = document.createElement("div");
+      card.className = "project-card";
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      card.innerHTML = `
+        <div class="project-card-info">
+          <div class="project-card-name">${escapeHtml(project.name)}</div>
+          <div class="project-card-meta">${project.items ? project.items.length + " 张" : "0 张"} · ${formatRelativeTime(project.updatedAt)}</div>
+        </div>
+        <div class="project-card-actions">
+          <button class="project-card-delete" type="button" title="删除项目" data-id="${project.id}">删除</button>
+        </div>
+      `;
+
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".project-card-delete")) return;
+        openProject(project.id);
+      });
+      card.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProject(project.id); }
+      });
+
+      const deleteBtn = card.querySelector(".project-card-delete");
+      deleteBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`确定要删除项目"${project.name}"吗？`)) return;
+        await deleteProject(project.id);
+        card.remove();
+      });
+
+      list.appendChild(card);
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // 项目名内联重命名
+  function initProjectNameEditor() {
+    const el = document.getElementById("projectName");
+    if (!el) return;
+
+    function startEdit() {
+      if (!state.project.id) return;
+      el.classList.add("is-editing");
+      el.contentEditable = "true";
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    }
+
+    function commitEdit() {
+      el.contentEditable = "false";
+      el.classList.remove("is-editing");
+      const newName = el.textContent.trim();
+      if (newName && newName !== "—") {
+        state.project.name = newName;
+        saveProject();
+      } else {
+        el.textContent = state.project.name || "—";
+      }
+    }
+
+    el.addEventListener("click", startEdit);
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+      if (e.key === "Escape") { el.textContent = state.project.name || "—"; commitEdit(); }
+    });
+    el.addEventListener("blur", commitEdit);
+  }
+
+  // "项目列表"按钮：回到欢迎页
+  function initProjectsButton() {
+    const btn = document.getElementById("projectsButton");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      const projects = await listProjects();
+      renderProjectCards(projects);
+      showWelcomeScreen();
+    });
+  }
+
+  // ---- 启动：初始化 IndexedDB，始终显示欢迎页 ----
+  initProjectDB()
+    .then(async () => {
+      const projects = await listProjects();
+      renderProjectCards(projects);
+      showWelcomeScreen();
+      initProjectNameEditor();
+      initProjectsButton();
+
+      const newBtn = document.getElementById("newProjectButton");
+      if (newBtn) {
+        newBtn.addEventListener("click", startNewProject);
+      }
+    })
+    .catch((err) => {
+      console.warn("IndexedDB 不可用，项目持久化已禁用", err);
+      drawEmptyCanvas();
+    });
 })();
