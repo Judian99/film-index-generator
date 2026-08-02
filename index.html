@@ -10,6 +10,27 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <!-- 欢迎页 / 项目列表 -->
+    <div id="welcomeScreen" class="welcome-screen" hidden>
+      <div class="welcome-inner">
+        <div class="welcome-hero">
+          <div class="brand-mark welcome-brand-mark" aria-hidden="true"></div>
+          <div class="welcome-title-group">
+            <div class="welcome-title-row">
+              <h1>海带索引图</h1>
+              <span class="brand-film">FILM</span>
+            </div>
+            <p class="welcome-subtitle">整理扫描底片，生成可编辑、可导出的胶片索引图</p>
+          </div>
+        </div>
+        <button id="newProjectButton" class="primary-button welcome-new-btn" type="button">＋ 新建索引图</button>
+        <div class="welcome-projects-section">
+          <p class="welcome-section-label">历史项目</p>
+          <div id="projectList" class="project-list" aria-label="历史项目"></div>
+        </div>
+      </div>
+    </div>
+
     <main class="app-shell">
       <aside class="controls" aria-label="索引图设置">
         <div class="brand">
@@ -293,28 +314,48 @@
           <div>
             <p class="eyebrow">Preview</p>
             <h2 id="statusTitle">等待导入扫描件</h2>
+            <div class="project-name-row">
+              <button id="projectsButton" class="project-name-btn" type="button" title="查看所有项目">☰</button>
+              <span id="projectName" class="project-name" title="点击重命名" tabindex="0" role="button" aria-label="项目名称，点击重命名">—</span>
+              <span class="project-name-sep" aria-hidden="true"></span>
+              <span class="inline-counter" id="imageCounter">0 张</span>
+            </div>
           </div>
           <div class="preview-tools" aria-label="预览缩放">
-            <button id="zoomOut" class="icon-button" type="button" aria-label="缩小预览">-</button>
-            <label class="zoom-field">
-              <span>缩放</span>
-              <input id="zoomRange" type="range" min="25" max="200" step="5" value="55" />
-            </label>
-            <button id="zoomIn" class="icon-button" type="button" aria-label="放大预览">+</button>
-            <button id="zoomFit" class="text-button" type="button">适合</button>
-            <button id="lightTableButton" class="text-button light-table-entry" type="button" aria-pressed="false" disabled>
-              <span class="light-table-entry-aperture" aria-hidden="true"><span></span></span>
-              <span class="light-table-entry-label">
-                <strong>观片台</strong>
-                <small>LIGHT TABLE</small>
-              </span>
-            </button>
-            <button id="frameSelectButton" class="text-button" type="button" aria-pressed="false" disabled>选择单帧</button>
-            <button id="clearFrameSelectionButton" class="text-button" type="button" disabled>清除选择</button>
-            <button id="batchFrameExportButton" class="primary-button" type="button" disabled>批量导出</button>
-            <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
-            <div class="counter" id="frameSelectionCounter" aria-live="polite">已选 0 帧</div>
-            <div class="counter" id="imageCounter">0 张</div>
+            <!-- 缩放控件 -->
+            <div class="tool-group">
+              <button id="zoomOut" class="icon-button" type="button" aria-label="缩小预览">-</button>
+              <label class="zoom-field">
+                <span>缩放</span>
+                <input id="zoomRange" type="range" min="25" max="200" step="5" value="55" />
+              </label>
+              <button id="zoomIn" class="icon-button" type="button" aria-label="放大预览">+</button>
+              <button id="zoomFit" class="text-button" type="button">适合</button>
+            </div>
+            <div class="tool-sep" aria-hidden="true"></div>
+            <!-- 观片台与选帧模式 -->
+            <div class="tool-group">
+              <button id="lightTableButton" class="text-button light-table-entry" type="button" aria-pressed="false" disabled>
+                <span class="light-table-entry-aperture" aria-hidden="true"><span></span></span>
+                <span class="light-table-entry-label">
+                  <strong>观片台</strong>
+                  <small>LIGHT TABLE</small>
+                </span>
+              </button>
+              <button id="frameSelectButton" class="text-button" type="button" aria-pressed="false" disabled>选择单帧</button>
+            </div>
+            <!-- 选帧操作：进入选帧模式后显示 -->
+            <div class="tool-group frame-select-group" aria-hidden="true">
+              <div class="tool-sep" aria-hidden="true"></div>
+              <button id="clearFrameSelectionButton" class="text-button" type="button" disabled>清除选择</button>
+              <button id="batchFrameExportButton" class="primary-button" type="button" disabled>批量导出</button>
+              <div class="counter" id="frameSelectionCounter" aria-live="polite">已选 0 帧</div>
+            </div>
+            <div class="tool-sep" aria-hidden="true"></div>
+            <!-- 导出 -->
+            <div class="tool-group">
+              <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
+            </div>
           </div>
         </div>
 
@@ -542,6 +583,6 @@
     <script src="film-frame-135.js"></script>
     <script src="film-frame.js"></script>
     <script src="optical-loupe.js"></script>
-    <script src="app.js?v=20260724-light-table"></script>
+    <script src="app.js?v=20260802-project"></script>
   </body>
 </html>

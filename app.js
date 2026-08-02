@@ -6064,21 +6064,25 @@
   }
 
   // ---- 启动：初始化 IndexedDB，始终显示欢迎页 ----
+  function bindWelcomeScreen() {
+    initProjectNameEditor();
+    initProjectsButton();
+    const newBtn = document.getElementById("newProjectButton");
+    if (newBtn) {
+      newBtn.addEventListener("click", startNewProject);
+    }
+  }
+
   initProjectDB()
     .then(async () => {
       const projects = await listProjects();
       renderProjectCards(projects);
       showWelcomeScreen();
-      initProjectNameEditor();
-      initProjectsButton();
-
-      const newBtn = document.getElementById("newProjectButton");
-      if (newBtn) {
-        newBtn.addEventListener("click", startNewProject);
-      }
+      bindWelcomeScreen();
     })
     .catch((err) => {
       console.warn("IndexedDB 不可用，项目持久化已禁用", err);
-      drawEmptyCanvas();
+      showWelcomeScreen();
+      bindWelcomeScreen();
     });
 })();
