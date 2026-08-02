@@ -60,6 +60,7 @@
   const columnsHint = document.getElementById("columnsHint");
   const frameWidthInput = document.getElementById("frameWidth");
   const exportScale = document.getElementById("exportScale");
+  const exportPagePreset = document.getElementById("exportPagePreset");
   const formatSelect = document.getElementById("formatSelect");
   const qualityField = document.getElementById("qualityField");
   const jpgQuality = document.getElementById("jpgQuality");
@@ -68,6 +69,10 @@
   const zoomIn = document.getElementById("zoomIn");
   const zoomFit = document.getElementById("zoomFit");
   const lightTableButton = document.getElementById("lightTableButton");
+  const frameSelectButton = document.getElementById("frameSelectButton");
+  const clearFrameSelectionButton = document.getElementById("clearFrameSelectionButton");
+  const batchFrameExportButton = document.getElementById("batchFrameExportButton");
+  const frameSelectionCounter = document.getElementById("frameSelectionCounter");
   const lightTableHud = document.getElementById("lightTableHud");
   const lightTableExit = document.getElementById("lightTableExit");
   const lightTableStatus = document.getElementById("lightTableStatus");
@@ -89,6 +94,7 @@
   const cropRestoreOriginal = document.getElementById("cropRestoreOriginal");
   const cropApply = document.getElementById("cropApply");
   const frameExportModal = document.getElementById("frameExportModal");
+  const frameExportTitle = document.getElementById("frameExportTitle");
   const frameExportCanvas = document.getElementById("frameExportCanvas");
   const frameExportMeta = document.getElementById("frameExportMeta");
   const frameExportScale = document.getElementById("frameExportScale");
@@ -123,6 +129,9 @@
     previewZoom: Number(zoomRange.value) / 100,
     // 画布交互：预览帧的命中区域、画布拖拽状态
     frameRects: [],
+    selectedFrameIds: new Set(),
+    frameSelectionMode: false,
+    frameSelectionAnchorId: null,
     canvasDrag: null,
     dragItemId: null,
     dropIndex: null,
@@ -531,14 +540,19 @@
       ? getFullResolutionScale(items)
       : clamp(Number(exportScale.value) || 1, 1, 3);
     if (!Number.isFinite(scale) || scale <= 0) { exportMemoryWarning.textContent = ""; return; }
-    const options = getRenderOptions(scale);
-    const layout = computeLayout(items.length, options);
+    const exportLayout = getExportRenderLayout(items.length, scale);
+    const { options, pageLayout: layout } = exportLayout;
     const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
     const estimatedPeakBytes = estimatedPixelBytes * 2;
     const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
     const memoryWarningThreshold = 500 * 1024 * 1024;
+    const preset = exportPagePreset.value;
+    const paperName = "A4";
+    const orientation = preset.endsWith("-landscape") ? "横向" : "竖向";
     if (estimatedPeakBytes > memoryWarningThreshold) {
       exportMemoryWarning.textContent = `⚠ 导出约需 ${estimatedPeakMB}MB 内存，老旧设备可能闪退，建议降低导出质量或减少照片`;
+    } else if (preset !== "free") {
+      exportMemoryWarning.textContent = `${paperName} ${orientation}比例 · 自动每行 ${options.columns} 张 · ${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} px`;
     } else {
       exportMemoryWarning.textContent = "";
     }
@@ -563,6 +577,7 @@
   }
 
   exportScale.addEventListener("change", updateExportFormatControls);
+  exportPagePreset.addEventListener("change", updateExportMemoryWarning);
   formatSelect.addEventListener("change", updateExportFormatControls);
 
   zoomRange.addEventListener("input", () => {
@@ -1090,6 +1105,21 @@
     openExportModal();
   });
 
+  frameSelectButton.addEventListener("click", () => {
+    if (!state.items.length || state.isExporting) return;
+    state.frameSelectionMode = !state.frameSelectionMode;
+    syncFrameSelectionControls();
+    render();
+  });
+
+  clearFrameSelectionButton.addEventListener("click", () => {
+    clearFrameSelection();
+  });
+
+  batchFrameExportButton.addEventListener("click", () => {
+    openBatchFrameExportModal(batchFrameExportButton);
+  });
+
   exportModalClose.addEventListener("click", closeExportModal);
   exportModalCancel.addEventListener("click", closeExportModal);
   exportModal.addEventListener("click", (event) => {
@@ -1111,6 +1141,8 @@
     state.reprocessGeneration += 1;
     state.items.forEach(releaseItem);
     state.items = [];
+    state.frameSelectionMode = false;
+    clearFrameSelection({ redraw: false });
     normalizeBackgroundSelection();
     updateBackgroundControls();
     render();
@@ -1149,6 +1181,75 @@
     if (previewWrap.contains(event.relatedTarget)) return;
     if (state.lightTable.focusMode) return;
     resetLoupeTarget();
+  }
+
+  function getSelectedFrameItems() {
+    const items = getSortedItems().filter((item) => state.selectedFrameIds.has(item.id));
+    if (items.length !== state.selectedFrameIds.size) pruneSelectedFrames();
+    return items;
+  }
+
+  function pruneSelectedFrames() {
+    const itemIds = new Set(state.items.map((item) => item.id));
+    let changed = false;
+    state.selectedFrameIds.forEach((itemId) => {
+      if (!itemIds.has(itemId)) {
+        state.selectedFrameIds.delete(itemId);
+        changed = true;
+      }
+    });
+    if (state.frameSelectionAnchorId && !itemIds.has(state.frameSelectionAnchorId)) {
+      state.frameSelectionAnchorId = null;
+      changed = true;
+    }
+    if (changed) syncFrameSelectionControls();
+    return changed;
+  }
+
+  function syncFrameSelectionControls() {
+    const selectedCount = state.selectedFrameIds.size;
+    const hasItems = state.items.length > 0;
+    frameSelectButton.disabled = !hasItems || state.isExporting;
+    frameSelectButton.setAttribute("aria-pressed", String(state.frameSelectionMode));
+    clearFrameSelectionButton.disabled = !selectedCount || state.isExporting;
+    batchFrameExportButton.disabled = !selectedCount || state.isExporting;
+    frameSelectionCounter.textContent = `已选 ${selectedCount} 帧`;
+  }
+
+  function selectFrameRange(itemId) {
+    const items = getSortedItems();
+    const targetIndex = items.findIndex((item) => item.id === itemId);
+    const anchorIndex = items.findIndex((item) => item.id === state.frameSelectionAnchorId);
+    if (targetIndex < 0 || anchorIndex < 0) {
+      state.selectedFrameIds.add(itemId);
+      state.frameSelectionAnchorId = itemId;
+      return;
+    }
+    const [start, end] = targetIndex < anchorIndex ? [targetIndex, anchorIndex] : [anchorIndex, targetIndex];
+    for (let index = start; index <= end; index += 1) {
+      state.selectedFrameIds.add(items[index].id);
+    }
+  }
+
+  function toggleFrameSelection(itemId, { range = false } = {}) {
+    if (range) {
+      selectFrameRange(itemId);
+    } else if (state.selectedFrameIds.has(itemId)) {
+      state.selectedFrameIds.delete(itemId);
+      state.frameSelectionAnchorId = itemId;
+    } else {
+      state.selectedFrameIds.add(itemId);
+      state.frameSelectionAnchorId = itemId;
+    }
+    syncFrameSelectionControls();
+    render();
+  }
+
+  function clearFrameSelection({ redraw = true } = {}) {
+    state.selectedFrameIds.clear();
+    state.frameSelectionAnchorId = null;
+    syncFrameSelectionControls();
+    if (redraw) render();
   }
 
   function canvasPoint(event, canvasRect = null) {
@@ -1205,6 +1306,8 @@
       scrollLeft: previewWrap.scrollLeft,
       scrollTop: previewWrap.scrollTop,
       itemId: hit ? hit.id : null,
+      selecting: Boolean(hit && (state.frameSelectionMode || event.ctrlKey || event.metaKey || event.shiftKey)),
+      range: Boolean(hit && event.shiftKey),
       ghost: null,
     };
     previewCanvas.setPointerCapture(event.pointerId);
@@ -1246,6 +1349,10 @@
     if (drag.mode === "pending") {
       const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
       if (moved < 6) return;
+      if (drag.selecting) {
+        drag.mode = "select-cancel";
+        return;
+      }
       drag.mode = "reorder";
       state.dragItemId = drag.itemId;
       drag.ghost = createDragGhost(drag.itemId);
@@ -1287,7 +1394,11 @@
     if (drag.mode === "pending") {
       const hit = hitFrame(canvasPoint(event));
       if (hit) {
-        showFrameMenu(hit.id, event.clientX, event.clientY);
+        if (drag.selecting) {
+          toggleFrameSelection(hit.id, { range: drag.range });
+        } else {
+          showFrameMenu(hit.id, event.clientX, event.clientY);
+        }
       }
       cancelCanvasDrag();
       return;
@@ -1321,7 +1432,7 @@
     state.canvasDrag = null;
     state.dragItemId = null;
     state.dropIndex = null;
-    previewWrap.classList.remove("is-panning", "is-reordering");
+    previewWrap.classList.remove("is-panning", "is-reordering", "is-selecting-frame");
     if (needsRedraw) {
       render();
       renderPhotoList();
@@ -2156,6 +2267,7 @@
       return;
     }
 
+    pruneSelectedFrames();
     const options = getRenderOptions(1);
     const items = getSortedItems();
     drawIndex(items, options);
@@ -2166,6 +2278,7 @@
     emptyState.classList.add("is-hidden");
     previewWrap.classList.remove("is-empty", "is-loading");
     exportButton.disabled = state.isExporting && !state.exportHydrationItems;
+    syncFrameSelectionControls();
     if (state.lightTable.active) state.lightTable.sortedItems = items;
     syncLightTableControls();
     applyPreviewZoom();
@@ -2395,7 +2508,11 @@
       pngParts.push(createPngChunk("IEND"));
       const blob = new Blob(pngParts, { type: "image/png" });
       if (blob.size > MAX_STREAMED_PNG_BYTES) throw new Error("PNG_FILE_TOO_LARGE");
-      downloadBlob(blob, `film-index-${new Date().toISOString().slice(0, 10)}-full-resolution.png`);
+      const pagePart = getExportPageFilenamePart(layout.pagePreset);
+      const filename = ["film-index", pagePart, new Date().toISOString().slice(0, 10), "full-resolution"]
+        .filter(Boolean)
+        .join("-");
+      downloadBlob(blob, `${filename}.png`);
       showNotice(`原图级索引图已拼接为一张 ${sizeLabel} 像素的 PNG`);
     } catch (error) {
       try {
@@ -2489,8 +2606,8 @@
         return;
       }
 
-      const options = getRenderOptions(scale);
-      const layout = computeLayout(state.items.length, options);
+      const exportLayout = getExportRenderLayout(state.items.length, scale);
+      const { options, pageLayout: layout } = exportLayout;
       const sizeLabel = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()}`;
 
       // 预估内存占用：RGBA 原始像素 + 编码缓冲（约 1.5–2 倍）
@@ -2550,7 +2667,11 @@
 
       try {
         const blob = await canvasToBlob(outputCanvas, mimeType, quality);
-        downloadBlob(blob, `film-index-${new Date().toISOString().slice(0, 10)}.${extension}`);
+        const pagePart = getExportPageFilenamePart();
+        const filename = ["film-index", pagePart, new Date().toISOString().slice(0, 10)]
+          .filter(Boolean)
+          .join("-");
+        downloadBlob(blob, `${filename}.${extension}`);
       } catch (error) {
         console.error("导出画布编码失败", error);
         showNotice(getExportFailureMessage("encode", isFullResolution, sizeLabel));
@@ -2579,7 +2700,7 @@
     }
   }
 
-  function getRenderOptions(scale) {
+  function getRenderOptions(scale, columnsOverride = null) {
     const baseFrameW = clamp(Number(frameWidthInput.value) || 420, 180, 1200) * scale;
     const format = getFormat();
     const ratio = format.ratio || 1.5;
@@ -2593,7 +2714,11 @@
     const normalGap = is120
       ? Math.round(slotH * TUNE.gap120)
       : Math.max(10 * scale, Math.round(pxPerMm135 * 2));
-    const selectedColumns = clamp(Number(columnsSelect.value) || 6, 2, 8);
+    const minimumColumns = isHalfFrame && !isCroppedHalfFrame ? 4 : 2;
+    const requestedColumns = columnsOverride === null
+      ? Number(columnsSelect.value) || 6
+      : Number(columnsOverride);
+    const selectedColumns = clamp(requestedColumns, minimumColumns, 8);
     const normalSixFrameAreaW = 6 * baseFrameW + 5 * normalGap;
     const wideSlotW = Math.round(format.imageWidthMm * pxPerMm135);
     const slotW = isCroppedHalfFrame ? baseFrameW / 2 : isWide135 ? wideSlotW : baseFrameW;
@@ -2690,6 +2815,7 @@
       imageInSprockets: isWide135 && imageInSprockets.checked,
       imageInEdgeText: isWide135 && imageInEdgeText.checked,
       showLeader: showLeader.checked && !is120,
+      backgroundMode: backgroundStyle.value,
       backgroundEnabled: backgroundStyle.value === "blur",
       backgroundBlurPx: clamp(Number(backgroundBlur.value) || 24, 8, 64) * scale,
       leaderW: baseFrameW + normalGap,
@@ -2729,6 +2855,86 @@
     return rows;
   }
 
+  function createExportPageLayout(contentLayout, preset = "free") {
+    if (preset === "free") return contentLayout;
+
+    const pageRatio = preset.endsWith("-landscape")
+      ? Math.SQRT2
+      : 1 / Math.SQRT2;
+    const contentRatio = contentLayout.canvasW / contentLayout.canvasH;
+    let canvasW = contentLayout.canvasW;
+    let canvasH = contentLayout.canvasH;
+
+    if (contentRatio > pageRatio) {
+      canvasH = Math.ceil(canvasW / pageRatio);
+    } else {
+      canvasW = Math.ceil(canvasH * pageRatio);
+    }
+
+    return {
+      ...contentLayout,
+      canvasW,
+      canvasH,
+      contentX: Math.round((canvasW - contentLayout.canvasW) / 2),
+      contentY: Math.round((canvasH - contentLayout.canvasH) / 2),
+      contentW: contentLayout.canvasW,
+      contentH: contentLayout.canvasH,
+      pagePreset: preset,
+    };
+  }
+
+  function getExportPageFilenamePart(preset = exportPagePreset.value) {
+    return preset === "free" ? "" : preset;
+  }
+
+  function getAdaptiveExportColumns() {
+    if (isCroppedHalfFrameMode() || is120Format() || is135WideFormat()) return null;
+    const minimum = isHalfFrameMode() ? 4 : 2;
+    return Array.from({ length: 9 - minimum }, (_, index) => minimum + index);
+  }
+
+  function scoreExportLayout(options, contentLayout, pageLayout) {
+    const contentArea = contentLayout.canvasW * contentLayout.canvasH;
+    const pageArea = pageLayout.canvasW * pageLayout.canvasH;
+    const lastRow = contentLayout.rows[contentLayout.rows.length - 1];
+    return [
+      (pageArea - contentArea) / contentArea,
+      lastRow.capacity > 0 ? (lastRow.capacity - lastRow.count) / lastRow.capacity : 0,
+      contentLayout.rows.length,
+      -(options.slotW * options.slotH),
+      -options.columns,
+    ];
+  }
+
+  function isBetterExportLayout(score, bestScore) {
+    if (!bestScore) return true;
+    const epsilon = 1e-9;
+    for (let index = 0; index < score.length; index += 1) {
+      const difference = score[index] - bestScore[index];
+      if (Math.abs(difference) <= epsilon) continue;
+      return difference < 0;
+    }
+    return false;
+  }
+
+  function getExportRenderLayout(itemCount, scale, preset = exportPagePreset.value) {
+    const candidates = preset === "free" ? null : getAdaptiveExportColumns();
+    const columnChoices = candidates || [null];
+    let best = null;
+
+    columnChoices.forEach((columnsOverride) => {
+      const options = getRenderOptions(scale, columnsOverride);
+      const contentLayout = computeLayout(itemCount, options);
+      const pageLayout = createExportPageLayout(contentLayout, preset);
+      const score = scoreExportLayout(options, contentLayout, pageLayout);
+      if (!best || isBetterExportLayout(score, best.score)) {
+        best = { columnsOverride, options, contentLayout, pageLayout, score };
+      }
+    });
+
+    return best;
+  }
+
   function computeLayout(itemCount, options) {
     const rows = buildRows(itemCount, options);
     const outerMargin = options.is120
@@ -2743,7 +2949,7 @@
   }
 
   function getRowX(layout, rowIndex, options) {
-    const baseX = options.sheetPad + layout.outerMargin;
+    const baseX = (layout.contentX || 0) + options.sheetPad + layout.outerMargin;
     if (!options.isWide135 || layout.rows.length < 2) return baseX;
 
     const firstRowOffset = layout.rows[1].stripW - layout.rows[0].stripW;
@@ -2765,8 +2971,11 @@
 
   // 绘制体：假定调用方已设好 ctx 变换。cullRect 为当前坐标空间内的可见区域（用于背景填充与整行剔除）。
   function paintIndex(items, options, layout, { cullRect, buildHitData }) {
-    drawSheetBackground(layout.canvasW, layout.canvasH, cullRect, state.lightTable.active);
-    if (options.backgroundEnabled && !state.lightTable.active) {
+    drawSheetBackground(layout.canvasW, layout.canvasH, cullRect, {
+      lightTable: state.lightTable.active,
+      backgroundMode: options.backgroundMode,
+    });
+    if (options.backgroundMode === "blur" && !state.lightTable.active) {
       const backgroundItem = getBackgroundItem(items);
       if (backgroundItem) {
         FilmFrame135.drawBlurredPhotoBackground(
@@ -2784,7 +2993,7 @@
     if (buildHitData) state.frameRects = [];
 
     layout.rows.forEach((rowInfo, row) => {
-      const y = options.sheetPad + row * (layout.stripH + options.rowGap);
+      const y = (layout.contentY || 0) + options.sheetPad + row * (layout.stripH + options.rowGap);
       const shadowPad = options.frameW * 0.08;
       if (y + layout.stripH + shadowPad < cullRect.y || y - shadowPad > cullRect.y + cullRect.height) return;
       const rowItems = items.slice(rowInfo.start, rowInfo.start + rowInfo.count);
@@ -2795,6 +3004,38 @@
     if (buildHitData && state.dropIndex !== null) {
       drawDropIndicator(layout, options);
     }
+    if (buildHitData && state.selectedFrameIds.size) {
+      drawSelectedFrameOverlays();
+    }
+  }
+
+  function drawSelectedFrameOverlays() {
+    state.frameRects.forEach((frame) => {
+      if (!state.selectedFrameIds.has(frame.id)) return;
+      const { x, y, w, h } = frame.bounds;
+      const lineWidth = Math.max(3, Math.min(w, h) * 0.025);
+      const badgeSize = Math.max(22, Math.min(w, h) * 0.16);
+      ctx.save();
+      ctx.fillStyle = "rgba(227, 165, 58, 0.14)";
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = "#e3a53a";
+      ctx.lineWidth = lineWidth;
+      ctx.strokeRect(x + lineWidth / 2, y + lineWidth / 2, w - lineWidth, h - lineWidth);
+      ctx.fillStyle = "#e3a53a";
+      ctx.beginPath();
+      ctx.arc(x + w - badgeSize * 0.7, y + badgeSize * 0.7, badgeSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = Math.max(2, badgeSize * 0.12);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(x + w - badgeSize * 0.95, y + badgeSize * 0.72);
+      ctx.lineTo(x + w - badgeSize * 0.76, y + badgeSize * 0.9);
+      ctx.lineTo(x + w - badgeSize * 0.43, y + badgeSize * 0.5);
+      ctx.stroke();
+      ctx.restore();
+    });
   }
 
   function drawLayout(items, options, layout, tile = null) {
@@ -2815,10 +3056,16 @@
     drawLayout(items, options, layout);
   }
 
-  function drawSheetBackground(width, height, bounds = { x: 0, y: 0, width, height }, lightTable = false) {
-    ctx.fillStyle = lightTable ? "#ffffff" : "#f7f1e6";
+  function drawSheetBackground(
+    width,
+    height,
+    bounds = { x: 0, y: 0, width, height },
+    { lightTable = false, backgroundMode = "none" } = {},
+  ) {
+    const pureWhite = lightTable || backgroundMode === "white";
+    ctx.fillStyle = pureWhite ? "#ffffff" : "#f7f1e6";
     ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-    if (lightTable) return;
+    if (pureWhite) return;
     ctx.fillStyle = "rgba(45, 40, 32, 0.035)";
     const firstStripe = Math.ceil(bounds.y / 18) * 18;
     for (let y = firstStripe; y < bounds.y + bounds.height; y += 18) {
@@ -3070,7 +3317,7 @@
     const frameStartX = rowX + options.stripPadX;
     const contentStartX = getRowContentStartX(frameStartX, rowInfo, options);
     const lineX = getSlotX(contentStartX, slot, options) - options.slotGap / 2;
-    const frameY = options.sheetPad + row * (layout.stripH + options.rowGap) + options.bandH;
+    const frameY = (layout.contentY || 0) + options.sheetPad + row * (layout.stripH + options.rowGap) + options.bandH;
     const geometry = getFrameExposureGeometry(getSlotX(contentStartX, slot, options), frameY, options);
     const inset = Math.round(options.slotH * 0.06);
 
@@ -3187,6 +3434,7 @@
     state.reprocessGeneration += 1;
     releaseItem(state.items[index]);
     state.items.splice(index, 1);
+    pruneSelectedFrames();
     normalizeBackgroundSelection();
     updateBackgroundControls();
     render();
@@ -3219,6 +3467,8 @@
     previewCanvas.height = 720;
     ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
     state.frameRects = [];
+    state.frameSelectionMode = false;
+    clearFrameSelection({ redraw: false });
     emptyState.classList.remove("is-hidden");
     previewWrap.classList.remove("is-loading");
     previewWrap.classList.add("is-empty");
@@ -3287,6 +3537,7 @@
       itemId,
       frameNumber: itemIndex + 1,
       editVersion: items[itemIndex].editVersion,
+      backgroundMode: renderOptions.backgroundMode,
       backgroundEnabled: renderOptions.backgroundEnabled,
       backgroundBlurPx: renderOptions.backgroundBlurPx,
       backgroundItem,
@@ -3369,13 +3620,16 @@
     canvas.height = bounds.height;
     const outputCtx = canvas.getContext("2d");
     if (!outputCtx) throw new Error("Canvas 2D context unavailable");
-    if (mimeType === "image/jpeg") {
+    if (snapshot.backgroundMode === "white") {
+      outputCtx.fillStyle = "#ffffff";
+      outputCtx.fillRect(0, 0, canvas.width, canvas.height);
+    } else if (mimeType === "image/jpeg") {
       outputCtx.fillStyle = "#e3ddd1";
       outputCtx.fillRect(0, 0, canvas.width, canvas.height);
     } else {
       outputCtx.clearRect(0, 0, canvas.width, canvas.height);
     }
-    if (snapshot.backgroundEnabled && snapshot.backgroundItem) {
+    if (snapshot.backgroundMode === "blur" && snapshot.backgroundItem) {
       FilmFrame135.drawBlurredPhotoBackground(
         outputCtx,
         snapshot.backgroundItem.source,
@@ -3390,28 +3644,49 @@
     return { canvas, options, bounds };
   }
 
+  function getPrimaryFrameExportSnapshot(exportState = state.frameExportState) {
+    if (!exportState) return null;
+    return exportState.mode === "batch" ? exportState.snapshots[0] : exportState;
+  }
+
+  function syncSnapshotExportSettings(snapshot, exportState = state.frameExportState) {
+    if (!snapshot || !exportState) return snapshot;
+    snapshot.scale = exportState.scale;
+    snapshot.mimeType = exportState.mimeType;
+    snapshot.quality = exportState.quality;
+    snapshot.busy = exportState.busy;
+    snapshot.cancelled = exportState.cancelled;
+    return snapshot;
+  }
+
   function updateFrameExportControls() {
-    const snapshot = state.frameExportState;
-    if (!snapshot) return;
-    snapshot.scale = frameExportScale.value;
-    if (snapshot.scale === "full") {
-      snapshot.mimeType = "image/png";
+    const exportState = state.frameExportState;
+    const snapshot = getPrimaryFrameExportSnapshot(exportState);
+    if (!exportState || !snapshot) return;
+    exportState.scale = frameExportScale.value;
+    if (exportState.scale === "full") {
+      exportState.mimeType = "image/png";
       frameExportFormat.value = "image/png";
       frameExportFormat.disabled = true;
     } else {
       frameExportFormat.disabled = false;
-      snapshot.mimeType = frameExportFormat.value;
+      exportState.mimeType = frameExportFormat.value;
     }
-    snapshot.quality = Number(frameExportQuality.value) / 100;
+    exportState.quality = Number(frameExportQuality.value) / 100;
+    syncSnapshotExportSettings(snapshot, exportState);
     frameExportQualityValue.value = `${frameExportQuality.value}%`;
-    frameExportQualityField.hidden = snapshot.mimeType !== "image/jpeg";
+    frameExportQualityField.hidden = exportState.mimeType !== "image/jpeg";
     try {
       const { bounds } = getFrameExportLayout(snapshot);
-      frameExportSize.textContent = `${bounds.width.toLocaleString()} × ${bounds.height.toLocaleString()} px`;
+      frameExportSize.textContent = exportState.mode === "batch"
+        ? `预览 ${bounds.width.toLocaleString()} × ${bounds.height.toLocaleString()} px`
+        : `${bounds.width.toLocaleString()} × ${bounds.height.toLocaleString()} px`;
       frameExportStatus.textContent = exceedsCanvasLimits(bounds.width, bounds.height)
         ? "该尺寸超过浏览器画布上限，请改用 3x"
-        : "使用当前裁切、旋转和片基设置";
-      frameExportApply.disabled = exceedsCanvasLimits(bounds.width, bounds.height) || snapshot.busy;
+        : exportState.mode === "batch"
+          ? `将按当前设置逐帧导出 ${exportState.snapshots.length} 帧`
+          : "使用当前裁切、旋转和片基设置";
+      frameExportApply.disabled = exceedsCanvasLimits(bounds.width, bounds.height) || exportState.busy;
     } catch (error) {
       frameExportSize.textContent = "无法计算输出尺寸";
       frameExportStatus.textContent = "请改用较低输出质量";
@@ -3420,8 +3695,10 @@
   }
 
   function drawFrameExportPreview() {
-    const snapshot = state.frameExportState;
+    const exportState = state.frameExportState;
+    const snapshot = getPrimaryFrameExportSnapshot(exportState);
     if (!snapshot) return;
+    syncSnapshotExportSettings(snapshot, exportState);
     try {
       const baseLayout = getFrameExportLayout(snapshot, 1);
       const previewScale = Math.min(1, 760 / baseLayout.bounds.width, 430 / baseLayout.bounds.height);
@@ -3445,7 +3722,10 @@
     }
     const snapshot = createFrameExportSnapshot(itemId, opener);
     if (!snapshot) return;
+    snapshot.mode = "single";
     state.frameExportState = snapshot;
+    frameExportTitle.textContent = "导出单帧";
+    frameExportApply.textContent = "导出单帧";
     frameExportScale.value = snapshot.scale;
     frameExportFormat.value = snapshot.mimeType;
     frameExportQuality.value = Math.round(snapshot.quality * 100);
@@ -3457,23 +3737,64 @@
     frameExportClose.focus();
   }
 
+  function openBatchFrameExportModal(opener) {
+    if (state.lightTable.active) exitLightTable({ restoreFocus: false });
+    if (state.isExporting) {
+      showNotice("请先取消当前导出，再批量导出单帧");
+      return;
+    }
+    const snapshots = getSelectedFrameItems()
+      .map((item) => createFrameExportSnapshot(item.id, opener))
+      .filter(Boolean);
+    if (!snapshots.length) {
+      showNotice("请先选择要导出的单帧");
+      return;
+    }
+    const exportState = {
+      mode: "batch",
+      snapshots,
+      scale: "2",
+      mimeType: "image/png",
+      quality: 0.92,
+      opener,
+      busy: false,
+      cancelled: false,
+    };
+    state.frameExportState = exportState;
+    frameExportTitle.textContent = "批量导出单帧";
+    frameExportApply.textContent = `批量导出 ${snapshots.length} 帧`;
+    frameExportScale.value = exportState.scale;
+    frameExportFormat.value = exportState.mimeType;
+    frameExportQuality.value = Math.round(exportState.quality * 100);
+    const first = snapshots[0];
+    frameExportMeta.textContent = `共 ${snapshots.length} 帧 · 预览第 ${first.frameNumber} 帧 · ${getFormatDisplayName(first.formatId, first.inputMode)} · ${first.stock.name}`;
+    frameExportModal.hidden = false;
+    document.body.style.overflow = "hidden";
+    updateFrameExportControls();
+    drawFrameExportPreview();
+    frameExportClose.focus();
+  }
+
   function closeFrameExportModal({ restoreFocus = true } = {}) {
-    const snapshot = state.frameExportState;
-    if (snapshot?.busy) {
-      snapshot.cancelled = true;
-      snapshot.item.remote?.abortController?.abort();
-      if (snapshot.backgroundItem !== snapshot.item) {
-        snapshot.backgroundItem?.remote?.abortController?.abort();
-      }
-      frameExportStatus.textContent = "正在取消单帧导出…";
+    const exportState = state.frameExportState;
+    if (exportState?.busy) {
+      exportState.cancelled = true;
+      const snapshots = exportState.mode === "batch" ? exportState.snapshots : [exportState];
+      snapshots.forEach((snapshot) => {
+        snapshot.item.remote?.abortController?.abort();
+        if (snapshot.backgroundItem !== snapshot.item) {
+          snapshot.backgroundItem?.remote?.abortController?.abort();
+        }
+      });
+      frameExportStatus.textContent = exportState.mode === "batch" ? "正在取消批量导出…" : "正在取消单帧导出…";
       return;
     }
     frameExportModal.hidden = true;
     document.body.style.overflow = "";
     state.frameExportState = null;
     if (restoreFocus) {
-      const focusTarget = snapshot?.opener && !snapshot.opener.closest("[hidden]")
-        ? snapshot.opener
+      const focusTarget = exportState?.opener && !exportState.opener.closest("[hidden]")
+        ? exportState.opener
         : previewCanvas;
       focusTarget.focus?.();
     }
@@ -3571,68 +3892,130 @@
     }
   });
 
-  frameExportApply.addEventListener("click", async () => {
-    const snapshot = state.frameExportState;
-    if (!snapshot || snapshot.busy || state.isExporting) return;
+  function validateFrameExportSnapshot(snapshot) {
     const item = state.items.find((entry) => entry.id === snapshot.itemId);
     if (!item || item !== snapshot.item || item.editVersion !== snapshot.editVersion) {
-      frameExportStatus.textContent = "图片状态已变化，请关闭后重新打开";
-      return;
+      throw new Error("FRAME_EXPORT_SOURCE_CHANGED");
     }
+    if (snapshot.backgroundEnabled) {
+      const backgroundItem = state.items.find((entry) => entry.id === snapshot.backgroundItemId);
+      if (!backgroundItem || backgroundItem.editVersion !== snapshot.backgroundEditVersion) {
+        throw new Error("FRAME_EXPORT_SOURCE_CHANGED");
+      }
+      snapshot.backgroundItem = backgroundItem;
+    }
+    return item;
+  }
 
-    snapshot.busy = true;
-    snapshot.cancelled = false;
+  async function ensureFrameExportOriginals(snapshots, exportState, label) {
+    const hydrationItems = [];
+    const hydrationIds = new Set();
+    snapshots.forEach((snapshot) => {
+      [snapshot.item, snapshot.backgroundEnabled ? snapshot.backgroundItem : null].forEach((item) => {
+        if (!item || hydrationIds.has(item.id)) return;
+        hydrationIds.add(item.id);
+        hydrationItems.push(item);
+      });
+    });
+    for (const item of hydrationItems) {
+      await ensureOriginal(item, label);
+      if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
+    }
+    snapshots.forEach((snapshot) => {
+      const item = state.items.find((entry) => entry.id === snapshot.itemId);
+      if (item) {
+        snapshot.item = item;
+        snapshot.editVersion = item.editVersion;
+      }
+      if (snapshot.backgroundEnabled) {
+        const backgroundItem = state.items.find((entry) => entry.id === snapshot.backgroundItemId);
+        if (backgroundItem) {
+          snapshot.backgroundItem = backgroundItem;
+          snapshot.backgroundEditVersion = backgroundItem.editVersion;
+        }
+      }
+    });
+  }
+
+  async function exportFrameSnapshot(snapshot, exportState) {
+    syncSnapshotExportSettings(snapshot, exportState);
+    const item = validateFrameExportSnapshot(snapshot);
+    snapshot.editVersion = item.editVersion;
+    if (snapshot.backgroundEnabled && snapshot.backgroundItem) {
+      snapshot.backgroundEditVersion = snapshot.backgroundItem.editVersion;
+    }
+    const scale = getFrameExportScale(snapshot);
+    const layout = getFrameExportLayout(snapshot, scale);
+    if (exceedsCanvasLimits(layout.bounds.width, layout.bounds.height)) {
+      const error = new Error("FRAME_EXPORT_CANVAS_LIMIT");
+      error.width = layout.bounds.width;
+      error.height = layout.bounds.height;
+      throw error;
+    }
+    if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
+    const { canvas } = renderFrameExportCanvas(snapshot, scale, exportState.mimeType);
+    if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
+    const blob = await canvasToBlob(canvas, exportState.mimeType, exportState.quality);
+    if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
+    const extension = exportState.mimeType === "image/jpeg" ? "jpg" : "png";
+    downloadBlob(blob, getFrameExportFilename(snapshot, extension));
+  }
+
+  async function runSingleFrameExport(exportState) {
+    const item = validateFrameExportSnapshot(exportState);
+    frameExportApply.textContent = item.remote?.quality !== "full" ? "正在获取原图…" : "正在导出…";
+    updateFrameExportControls();
+    await ensureFrameExportOriginals([exportState], exportState, "单帧导出");
+    frameExportApply.textContent = "正在导出…";
+    frameExportStatus.textContent = "正在绘制片基单帧";
+    await exportFrameSnapshot(exportState, exportState);
+    showNotice(`已导出第 ${exportState.frameNumber} 帧`);
+    exportState.busy = false;
+    closeFrameExportModal();
+  }
+
+  async function runBatchFrameExport(exportState) {
+    exportState.snapshots.forEach(validateFrameExportSnapshot);
+    frameExportApply.textContent = "正在获取原图…";
+    updateFrameExportControls();
+    await ensureFrameExportOriginals(exportState.snapshots, exportState, "批量导出");
+    for (let index = 0; index < exportState.snapshots.length; index += 1) {
+      if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
+      frameExportApply.textContent = `正在导出 ${index + 1}/${exportState.snapshots.length}`;
+      frameExportStatus.textContent = `正在导出第 ${index + 1} / ${exportState.snapshots.length} 帧`;
+      await exportFrameSnapshot(exportState.snapshots[index], exportState);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    showNotice(`已导出 ${exportState.snapshots.length} 帧`);
+    exportState.busy = false;
+    closeFrameExportModal();
+  }
+
+  frameExportApply.addEventListener("click", async () => {
+    const exportState = state.frameExportState;
+    if (!exportState || exportState.busy || state.isExporting) return;
+
+    exportState.busy = true;
+    exportState.cancelled = false;
     state.isExporting = true;
     setSourceEditingLocked(true);
     exportButton.disabled = true;
-    frameExportApply.textContent = item.remote?.quality !== "full" ? "正在获取原图…" : "正在导出…";
+    frameSelectButton.disabled = true;
+    clearFrameSelectionButton.disabled = true;
+    batchFrameExportButton.disabled = true;
     frameExportCancel.textContent = "取消导出";
     updateFrameExportControls();
 
     try {
-      const hydrationItems = [item];
-      if (snapshot.backgroundEnabled && snapshot.backgroundItem && snapshot.backgroundItem !== item) {
-        hydrationItems.push(snapshot.backgroundItem);
+      if (exportState.mode === "batch") {
+        await runBatchFrameExport(exportState);
+      } else {
+        await runSingleFrameExport(exportState);
       }
-      for (const hydrationItem of hydrationItems) {
-        await ensureOriginal(hydrationItem, "单帧导出");
-        if (snapshot.cancelled) throw new DOMException("Aborted", "AbortError");
-      }
-      if (!state.items.includes(item)) {
-        throw new Error("FRAME_EXPORT_SOURCE_CHANGED");
-      }
-      snapshot.editVersion = item.editVersion;
-      if (snapshot.backgroundEnabled) {
-        const backgroundItem = state.items.find((entry) => entry.id === snapshot.backgroundItemId);
-        if (!backgroundItem) throw new Error("FRAME_EXPORT_SOURCE_CHANGED");
-        snapshot.backgroundItem = backgroundItem;
-        snapshot.backgroundEditVersion = backgroundItem.editVersion;
-      }
-      frameExportApply.textContent = "正在导出…";
-      frameExportStatus.textContent = "正在绘制片基单帧";
-      const scale = getFrameExportScale(snapshot);
-      const layout = getFrameExportLayout(snapshot, scale);
-      if (exceedsCanvasLimits(layout.bounds.width, layout.bounds.height)) {
-        const error = new Error("FRAME_EXPORT_CANVAS_LIMIT");
-        error.width = layout.bounds.width;
-        error.height = layout.bounds.height;
-        throw error;
-      }
-      if (snapshot.cancelled) throw new DOMException("Aborted", "AbortError");
-      const { canvas } = renderFrameExportCanvas(snapshot, scale, snapshot.mimeType);
-      if (snapshot.cancelled) throw new DOMException("Aborted", "AbortError");
-      frameExportStatus.textContent = "正在编码图片";
-      const blob = await canvasToBlob(canvas, snapshot.mimeType, snapshot.quality);
-      if (snapshot.cancelled) throw new DOMException("Aborted", "AbortError");
-      const extension = snapshot.mimeType === "image/jpeg" ? "jpg" : "png";
-      downloadBlob(blob, getFrameExportFilename(snapshot, extension));
-      showNotice(`已导出第 ${snapshot.frameNumber} 帧`);
-      snapshot.busy = false;
-      closeFrameExportModal();
     } catch (error) {
-      snapshot.busy = false;
+      exportState.busy = false;
       if (error.name === "AbortError") {
-        frameExportStatus.textContent = "单帧导出已取消";
+        frameExportStatus.textContent = exportState.mode === "batch" ? "批量导出已取消" : "单帧导出已取消";
       } else if (error.message === "FRAME_EXPORT_CANVAS_LIMIT") {
         const width = Math.ceil(error.width || 0).toLocaleString();
         const height = Math.ceil(error.height || 0).toLocaleString();
@@ -3641,7 +4024,7 @@
         frameExportStatus.textContent = "图片状态已变化，请关闭后重新打开";
       } else {
         console.error("单帧导出失败", error);
-        frameExportStatus.textContent = "单帧导出失败，请降低输出质量后重试";
+        frameExportStatus.textContent = exportState.mode === "batch" ? "批量导出失败，请降低输出质量后重试" : "单帧导出失败，请降低输出质量后重试";
       }
     } finally {
       state.isExporting = false;
@@ -3649,7 +4032,10 @@
       updateFrameModeControls();
       updateExportFormatControls();
       exportButton.disabled = !state.items.length;
-      frameExportApply.textContent = "导出单帧";
+      syncFrameSelectionControls();
+      frameExportApply.textContent = state.frameExportState?.mode === "batch"
+        ? `批量导出 ${state.frameExportState.snapshots.length} 帧`
+        : "导出单帧";
       frameExportCancel.textContent = "取消";
       if (state.frameExportState) {
         updateFrameExportControls();
@@ -3676,6 +4062,11 @@
       } else if (state.lightTable.active) {
         event.preventDefault();
         exitLightTable();
+      } else if (state.frameSelectionMode) {
+        event.preventDefault();
+        state.frameSelectionMode = false;
+        syncFrameSelectionControls();
+        render();
       }
       return;
     }

@@ -1072,8 +1072,20 @@ select {
   font-size: 13px;
 }
 
+.text-button[aria-pressed="true"] {
+  border-color: rgba(227, 165, 58, 0.65);
+  background: rgba(227, 165, 58, 0.16);
+  color: #8b5a12;
+}
+
+.text-button:disabled {
+  color: #8b918c;
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .icon-button:hover,
-.text-button:hover {
+.text-button:hover:not(:disabled) {
   background: white;
 }
 
@@ -1156,6 +1168,11 @@ canvas {
 .preview-wrap.is-panning,
 .preview-wrap.is-panning canvas {
   cursor: grabbing;
+}
+
+.preview-wrap.is-selecting-frame,
+.preview-wrap.is-selecting-frame canvas {
+  cursor: crosshair;
 }
 
 .preview-wrap.is-reordering,
