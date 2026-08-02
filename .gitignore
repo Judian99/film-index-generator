@@ -6,3 +6,6 @@
 /test-results/
 /测试说明.md
 /*-local-command-caveat*.txt
+.agents/
+/skills-lock.json
+/nul
