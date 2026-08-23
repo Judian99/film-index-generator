@@ -3,6 +3,17 @@
 
   const FilmFrame135 = window.FilmFrame135;
   if (!FilmFrame135) throw new Error("FilmFrame135 renderer is unavailable.");
+  const Shared = window.FilmFrameShared;
+  if (!Shared) throw new Error("FilmFrameShared module is unavailable.");
+
+  // 共享基元（见 film-frame-shared.js）
+  const {
+    deterministicNoise,
+    buildSingleStripPath,
+    setEdgeInk,
+    beginStripSurface,
+    endStripSurface,
+  } = Shared;
 
   const FORMAT_DEFINITIONS = Object.freeze({
     "135": Object.freeze({ id: "135", family: "135", ratio: 36 / 24, imageWidthMm: 36, imageHeightMm: 24, label: "135 全画幅", sizeLabel: "36 × 24 mm" }),
@@ -61,15 +72,10 @@
     });
   }
 
-  function getTune(options) {
-    return options.tune || DEFAULT_TUNE;
-  }
+  const getTune = (options) => Shared.resolveTune(options, DEFAULT_TUNE);
 
   function edgeFont120(options, scale = 1) {
-    const tune = getTune(options);
-    const regularSize = Math.max(1, Math.round(options.textH * tune.fontSize120));
-    const fontSize = Math.max(1, Math.round(regularSize * scale));
-    return { fontSize, font: `700 ${fontSize}px "Courier New", monospace` };
+    return Shared.edgeFontSize(options, scale, getTune(options), "fontSize120", 1, 1);
   }
 
   function getEdgeMarkLayout120(x, stripW, rowInfo, options) {
@@ -80,12 +86,6 @@
       x: startX + mark * markPitch,
       index: Math.floor(rowInfo.start / options.edgeMarkSlotSpan) + mark,
     })).filter((mark) => mark.x < x + stripW);
-  }
-
-  function setEdgeInk(ctx, options) {
-    ctx.shadowColor = options.stock.edgeInk.glow;
-    ctx.shadowBlur = 3;
-    ctx.fillStyle = options.stock.edgeInk.color;
   }
 
   function drawEdgeTextTop120(ctx, x, zoneY, stripW, rowInfo, options) {
@@ -148,19 +148,12 @@
       let bx = barZoneX;
       for (let i = 0; i < 14 && bx < barZoneX + barZoneW; i += 1) {
         const seed = mark.index * 197 + i * 13;
-        const barW = Math.max(1, Math.round(fontSize * (0.05 + FilmFrame135.deterministicNoise(seed) * 0.1)));
+        const barW = Math.max(1, Math.round(fontSize * (0.05 + deterministicNoise(seed) * 0.1)));
         ctx.fillRect(Math.round(bx), barY, barW, barH);
-        bx += barW + Math.max(1, Math.round(fontSize * (0.06 + FilmFrame135.deterministicNoise(seed + 7) * 0.12)));
+        bx += barW + Math.max(1, Math.round(fontSize * (0.06 + deterministicNoise(seed + 7) * 0.12)));
       }
     });
     ctx.restore();
-  }
-
-  function buildSingleStripPath(ctx, x, y, stripW, stripH, options) {
-    const radius = options.is120
-      ? Math.max(2, Math.round(options.frameW * 0.004))
-      : Math.max(6, Math.round(options.frameW * 0.015));
-    FilmFrame135.roundedRect(ctx, x, y, stripW, stripH, radius);
   }
 
   function createSingleFrame135FamilyOptions(settings, format, inputAdapter) {
@@ -329,7 +322,7 @@
     };
     const buildPath = (context, px, py, width, height) => buildSingleStripPath(context, px, py, width, height, options);
 
-    FilmFrame135.beginStripSurface(ctx, x, y, options.stripW, options.stripH, options, buildPath);
+    beginStripSurface(ctx, x, y, options.stripW, options.stripH, options, buildPath);
     const geometry = FilmFrame135.drawFrame(ctx, item, frameX, frameY, options);
     if (options.showSprockets) {
       const topZoneY = y + options.textH - options.textSprocketShift;
@@ -346,7 +339,7 @@
         FilmFrame135.drawEdgeTextBottom(ctx, x, y + options.stripH - options.textH, options.stripW, rowInfo, options);
       }
     }
-    FilmFrame135.endStripSurface(ctx, x, y, options.stripW, options.stripH, options, buildPath);
+    endStripSurface(ctx, x, y, options.stripW, options.stripH, options, buildPath);
     return {
       frameGeometry: geometry,
       stripBounds: { x, y, w: options.stripW, h: options.stripH },

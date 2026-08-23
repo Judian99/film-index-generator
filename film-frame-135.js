@@ -1,6 +1,9 @@
 (() => {
   "use strict";
 
+  const Shared = window.FilmFrameShared;
+  if (!Shared) throw new Error("FilmFrameShared module is unavailable.");
+
   const FILM_135 = Object.freeze({
     filmHeightMm: 35,
     imageHeightMm: 24,
@@ -22,25 +25,16 @@
 
   const EDGE_NUMBER_SUFFIX_SCALE = 0.68;
 
-  function getTune(options) {
-    return options.tune || DEFAULT_TUNE_135;
-  }
-
-  function roundedRect(ctx, x, y, width, height, radius) {
-    const r = Math.min(radius, width / 2, height / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + width, y, x + width, y + height, r);
-    ctx.arcTo(x + width, y + height, x, y + height, r);
-    ctx.arcTo(x, y + height, x, y, r);
-    ctx.arcTo(x, y, x + width, y, r);
-    ctx.closePath();
-  }
-
-  function deterministicNoise(seed) {
-    const x = Math.sin(seed * 12.9898) * 43758.5453;
-    return x - Math.floor(x);
-  }
+  // 共享基元（见 film-frame-shared.js），本文件内按 135 语境直接引用
+  const {
+    roundedRect,
+    deterministicNoise,
+    beginStripSurface,
+    endStripSurface,
+    buildSingleStripPath,
+    setEdgeInk,
+  } = Shared;
+  const getTune = (options) => Shared.resolveTune(options, DEFAULT_TUNE_135);
 
   function getFrameExposureGeometry(x, y, options) {
     const central = { x, y, w: options.slotW, h: options.slotH };
@@ -235,10 +229,7 @@
   }
 
   function edgeFont(options, scale = 1) {
-    const tune = getTune(options);
-    const regularSize = Math.max(11, Math.round(options.textH * tune.fontSize));
-    const fontSize = Math.max(7, Math.round(regularSize * scale));
-    return { fontSize, font: `700 ${fontSize}px "Courier New", monospace` };
+    return Shared.edgeFontSize(options, scale, getTune(options), "fontSize", 11, 7);
   }
 
   function getEdgeMarkLayout(x, stripW, rowInfo, options) {
@@ -263,12 +254,6 @@
     ctx.font = edgeFont(options, EDGE_NUMBER_SUFFIX_SCALE).font;
     ctx.fillText("A", x + digitWidth, baseline);
     ctx.font = regularFont;
-  }
-
-  function setEdgeInk(ctx, options) {
-    ctx.shadowColor = options.stock.edgeInk.glow;
-    ctx.shadowBlur = 3;
-    ctx.fillStyle = options.stock.edgeInk.color;
   }
 
   function drawEdgeTextTop(ctx, x, zoneY, stripW, rowInfo, rowIndex, options) {
@@ -316,44 +301,6 @@
       );
     });
     ctx.restore();
-  }
-
-  function beginStripSurface(ctx, x, y, stripW, stripH, options, buildPath) {
-    ctx.save();
-    ctx.shadowColor = "rgba(25, 20, 12, 0.35)";
-    ctx.shadowBlur = Math.round(options.frameW * 0.05);
-    ctx.shadowOffsetY = Math.round(options.frameW * 0.018);
-    buildPath(ctx, x, y, stripW, stripH);
-    ctx.fillStyle = "#131110";
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    buildPath(ctx, x, y, stripW, stripH);
-    ctx.clip();
-    const baseGradient = ctx.createLinearGradient(0, y, 0, y + stripH);
-    baseGradient.addColorStop(0, "#231e19");
-    baseGradient.addColorStop(0.12, "#161311");
-    baseGradient.addColorStop(0.5, "#191512");
-    baseGradient.addColorStop(0.88, "#151210");
-    baseGradient.addColorStop(1, "#241f1a");
-    ctx.fillStyle = baseGradient;
-    ctx.fillRect(x, y, stripW, stripH);
-    const sheen = ctx.createLinearGradient(x, y, x + stripW * 0.55, y + stripH);
-    sheen.addColorStop(0, "rgba(255, 250, 235, 0.05)");
-    sheen.addColorStop(0.35, "rgba(255, 250, 235, 0)");
-    sheen.addColorStop(0.8, "rgba(255, 250, 235, 0.025)");
-    sheen.addColorStop(1, "rgba(255, 250, 235, 0)");
-    ctx.fillStyle = sheen;
-    ctx.fillRect(x, y, stripW, stripH);
-  }
-
-  function endStripSurface(ctx, x, y, stripW, stripH, options, buildPath) {
-    ctx.restore();
-    buildPath(ctx, x + 0.5, y + 0.5, stripW - 1, stripH - 1);
-    ctx.strokeStyle = "rgba(255, 248, 230, 0.07)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
   }
 
   function createSingleFrame135Options({
@@ -414,10 +361,6 @@
       stripW,
       stripH,
     };
-  }
-
-  function buildSingleStripPath(ctx, x, y, stripW, stripH, options) {
-    roundedRect(ctx, x, y, stripW, stripH, Math.max(6, Math.round(options.frameW * 0.015)));
   }
 
   function renderSingleFrame135(ctx, item, options, origin = {}) {
