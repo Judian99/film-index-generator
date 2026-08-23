@@ -3,19 +3,12 @@
  * 清除加密 Cookie
  */
 
+import { jsonResponse, resolveOrigin } from './lib/http.js';
+
 export async function handleLogout(request, env, ctx) {
-  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
+  const origin = resolveOrigin(env);
 
-  const response = new Response(JSON.stringify({
-    logged_out: true
-  }), {
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': origin,
-      'Access-Control-Allow-Credentials': 'true',
-      'Set-Cookie': 'bd_token=; HttpOnly; Secure; SameSite=None; Max-Age=0; Path=/'
-    }
+  return jsonResponse(origin, 200, { logged_out: true }, {
+    'Set-Cookie': 'bd_token=; HttpOnly; Secure; SameSite=None; Max-Age=0; Path=/'
   });
-
-  return response;
 }

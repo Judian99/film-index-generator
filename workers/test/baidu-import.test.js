@@ -261,3 +261,29 @@ test('thumbnail rejects unsupported upstream MIME types', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('unknown paths return a JSON 404 with CORS headers', async () => {
+  const response = await workerRequest('/nope');
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'Not Found' });
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), ENV.FRONTEND_ORIGIN);
+  assert.equal(response.headers.get('Content-Type'), 'application/json');
+});
+
+test('OPTIONS preflight responds 204 with full CORS headers', async () => {
+  const response = await worker.fetch(new Request('https://worker.test/files', {
+    method: 'OPTIONS'
+  }), ENV, {});
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), ENV.FRONTEND_ORIGIN);
+  assert.equal(response.headers.get('Access-Control-Allow-Credentials'), 'true');
+  assert.equal(response.headers.get('Access-Control-Allow-Methods'), 'GET, POST, OPTIONS');
+});
+
+test('logout clears the auth cookie and returns JSON', async () => {
+  const response = await workerRequest('/logout', await authCookie());
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { logged_out: true });
+  assert.match(response.headers.get('Set-Cookie') || '', /^bd_token=;/);
+  assert.equal(response.headers.get('Access-Control-Allow-Origin'), ENV.FRONTEND_ORIGIN);
+});

@@ -165,9 +165,12 @@ http://localhost:8787/callback
 | `/auth` | GET | 发起 OAuth 授权，重定向到百度 |
 | `/callback` | GET | OAuth 回调，换取 token 并存入 Cookie |
 | `/status` | GET | 检查登录状态，返回用户信息 |
-| `/files` | GET | 获取文件列表（参数：path, page, num） |
-| `/download` | GET | 下载文件（参数：fs_id） |
+| `/files` | GET | 获取文件列表（参数：path；目录与图片合并去重后返回，并为图片签发缩略图票据） |
+| `/thumbnail` | GET | 缩略图代理（参数：ticket，由 `/files` 签发，绑定账号且 1 小时有效） |
+| `/download` | GET | 流式下载文件（参数：fs_id） |
 | `/logout` | GET | 清除登录状态 |
+
+公共工具位于 `src/lib/http.js`（CORS 头、JSON 响应、Cookie token 解析、账号指纹），新增端点直接复用。
 
 ---
 

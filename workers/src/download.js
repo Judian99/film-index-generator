@@ -4,44 +4,16 @@
  */
 
 import { getDownloadUrl, buildDownloadUrl } from './lib/baidu-pan.js';
-import { decryptToken } from './lib/crypto.js';
-
-/**
- * 从 Cookie 中提取并解密 token
- */
-async function getTokenFromCookie(request, encryptionKey) {
-  const cookieHeader = request.headers.get('Cookie') || '';
-  const match = cookieHeader.match(/bd_token=([^;]+)/);
-
-  if (!match) {
-    return null;
-  }
-
-  try {
-    const encryptedToken = match[1];
-    const decryptedPayload = await decryptToken(encryptedToken, encryptionKey);
-    const tokenData = JSON.parse(decryptedPayload);
-    return tokenData;
-  } catch (error) {
-    console.error('Token decryption failed:', error);
-    return null;
-  }
-}
+import { corsHeaders, getTokenFromCookie, jsonResponse, resolveOrigin } from './lib/http.js';
 
 export async function handleDownload(request, env, ctx) {
-  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
+  const origin = resolveOrigin(env);
   const url = new URL(request.url);
   const fsId = url.searchParams.get('fs_id');
 
   if (!fsId) {
-    return new Response(JSON.stringify({
+    return jsonResponse(origin, 400, {
       error: 'Missing fs_id parameter'
-    }), {
-      status: 400,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(origin)
-      }
     });
   }
 
@@ -50,14 +22,8 @@ export async function handleDownload(request, env, ctx) {
     const tokenData = await getTokenFromCookie(request, env.TOKEN_ENCRYPTION_KEY);
 
     if (!tokenData || !tokenData.access_token) {
-      return new Response(JSON.stringify({
+      return jsonResponse(origin, 401, {
         error: 'Not authenticated'
-      }), {
-        status: 401,
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders(origin)
-        }
       });
     }
 
@@ -82,8 +48,7 @@ export async function handleDownload(request, env, ctx) {
       'Content-Disposition': 'inline',
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'private, no-store',
-      'Access-Control-Allow-Origin': origin,
-      'Access-Control-Allow-Credentials': 'true'
+      ...corsHeaders(origin)
     });
 
     return new Response(response.body, { headers });
@@ -91,21 +56,8 @@ export async function handleDownload(request, env, ctx) {
   } catch (error) {
     console.error('Download error:', error);
 
-    return new Response(JSON.stringify({
+    return jsonResponse(origin, 500, {
       error: error.message
-    }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(origin)
-      }
     });
   }
-}
-
-function corsHeaders(origin) {
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Credentials': 'true'
-  };
 }

@@ -4,53 +4,26 @@
  */
 
 import { getUserInfo } from './lib/baidu-pan.js';
-import { decryptToken } from './lib/crypto.js';
-
-/**
- * 从 Cookie 中提取并解密 token
- */
-async function getTokenFromCookie(request, encryptionKey) {
-  const cookieHeader = request.headers.get('Cookie') || '';
-  const match = cookieHeader.match(/bd_token=([^;]+)/);
-
-  if (!match) {
-    return null;
-  }
-
-  try {
-    const encryptedToken = match[1];
-    const decryptedPayload = await decryptToken(encryptedToken, encryptionKey);
-    const tokenData = JSON.parse(decryptedPayload);
-    return tokenData;
-  } catch (error) {
-    console.error('Token decryption failed:', error);
-    return null;
-  }
-}
+import { getTokenFromCookie, jsonResponse, resolveOrigin } from './lib/http.js';
 
 export async function handleStatus(request, env, ctx) {
-  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
+  const origin = resolveOrigin(env);
 
   try {
     // 获取 token
     const tokenData = await getTokenFromCookie(request, env.TOKEN_ENCRYPTION_KEY);
 
     if (!tokenData || !tokenData.access_token) {
-      return new Response(JSON.stringify({
+      return jsonResponse(origin, 200, {
         logged_in: false,
         user: null
-      }), {
-        headers: {
-          'Content-Type': 'application/json',
-          ...corsHeaders(origin)
-        }
       });
     }
 
     // 获取用户信息
     const userInfo = await getUserInfo(tokenData.access_token);
 
-    return new Response(JSON.stringify({
+    return jsonResponse(origin, 200, {
       logged_in: true,
       user: {
         baidu_name: userInfo.baidu_name,
@@ -60,31 +33,14 @@ export async function handleStatus(request, env, ctx) {
         total_quota: userInfo.total,
         used_quota: userInfo.used
       }
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(origin)
-      }
     });
 
   } catch (error) {
     console.error('Status check error:', error);
 
-    return new Response(JSON.stringify({
+    return jsonResponse(origin, 200, {
       logged_in: false,
       error: error.message
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(origin)
-      }
     });
   }
-}
-
-function corsHeaders(origin) {
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Credentials': 'true'
-  };
 }

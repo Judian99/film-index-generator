@@ -1,31 +1,19 @@
 import { listFiles, listImages } from './lib/baidu-pan.js';
-import { decryptToken, encryptToken } from './lib/crypto.js';
+import { encryptToken } from './lib/crypto.js';
+import { getTokenFromCookie, jsonResponse, resolveOrigin, tokenFingerprint } from './lib/http.js';
 
 const DIRECTORY_BATCH_SIZE = 1000;
 const MAX_DIRECTORY_PAGES = 20;
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
-async function getTokenFromCookie(request, encryptionKey) {
-  const cookieHeader = request.headers.get('Cookie') || '';
-  const match = cookieHeader.match(/bd_token=([^;]+)/);
-  if (!match) return null;
-
-  try {
-    return JSON.parse(await decryptToken(match[1], encryptionKey));
-  } catch (error) {
-    console.error('Token decryption failed');
-    return null;
-  }
-}
-
 export async function handleFiles(request, env, ctx) {
-  const origin = env.FRONTEND_ORIGIN || 'https://judian99.github.io';
+  const origin = resolveOrigin(env);
   const url = new URL(request.url);
   const path = normalizePath(url.searchParams.get('path'));
 
   const tokenData = await getTokenFromCookie(request, env.TOKEN_ENCRYPTION_KEY);
   if (!tokenData?.access_token) {
-    return jsonResponse(origin, 401, 'Not authenticated', 'NOT_AUTHENTICATED');
+    return jsonResponse(origin, 401, { error: 'Not authenticated', code: 'NOT_AUTHENTICATED' });
   }
 
   let directoryFiles;
@@ -55,19 +43,13 @@ export async function handleFiles(request, env, ctx) {
       .map(file => normalizeImage(file, request.url, accountFingerprint, env.TOKEN_ENCRYPTION_KEY)));
     const files = mergeFiles(directories, images.filter(Boolean));
 
-    return new Response(JSON.stringify({
+    return jsonResponse(origin, 200, {
       path,
       total: files.length,
       files
-    }), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...corsHeaders(origin)
-      }
-    });
-  } catch (error) {
+    });} catch (error) {
     console.error('Files response generation failed', { path });
-    return jsonResponse(origin, 500, 'Unable to prepare file list', 'FILES_RESPONSE_FAILED');
+    return jsonResponse(origin, 500, { error: 'Unable to prepare file list', code: 'FILES_RESPONSE_FAILED' });
   }
 }
 
@@ -205,36 +187,14 @@ function normalizePath(path) {
 
 function upstreamErrorResponse(origin, error) {
   if (error.errno === -6 || error.errno === 31045) {
-    return jsonResponse(origin, 401, 'Baidu authorization expired', 'BAIDU_AUTH_EXPIRED');
+    return jsonResponse(origin, 401, { error: 'Baidu authorization expired', code: 'BAIDU_AUTH_EXPIRED' });
   }
   if (error.errno === 20013) {
-    return jsonResponse(origin, 403, 'Baidu API permission denied', 'BAIDU_PERMISSION_DENIED');
+    return jsonResponse(origin, 403, { error: 'Baidu API permission denied', code: 'BAIDU_PERMISSION_DENIED' });
   }
   if (error.code === 'BAIDU_DIRECTORY_TOO_LARGE') {
-    return jsonResponse(origin, 502, 'Directory contains too many entries', error.code);
+    return jsonResponse(origin, 502, { error: 'Directory contains too many entries', code: error.code });
   }
-  return jsonResponse(origin, 502, 'Unable to read Baidu file list', 'BAIDU_FILES_UPSTREAM_FAILED');
+  return jsonResponse(origin, 502, { error: 'Unable to read Baidu file list', code: 'BAIDU_FILES_UPSTREAM_FAILED' });
 }
 
-function jsonResponse(origin, status, error, code) {
-  return new Response(JSON.stringify({ error, code }), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...corsHeaders(origin)
-    }
-  });
-}
-
-async function tokenFingerprint(accessToken) {
-  const data = new TextEncoder().encode(accessToken);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function corsHeaders(origin) {
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Credentials': 'true'
-  };
-}
