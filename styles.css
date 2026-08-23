@@ -1438,13 +1438,6 @@ input[type="range"]:focus-visible {
   border-left: 0;
 }
 
-.tool-divider {
-  width: 1px;
-  align-self: stretch;
-  margin: 2px 0;
-  background: var(--line);
-}
-
 /* 观片台入口按钮 */
 .light-table-entry.text-button {
   position: relative;

@@ -32,7 +32,6 @@
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
   var EASE_OUT = 'power3.out';
-  var EASE_SCENE = 'power2.inOut';
 
   gsap.defaults({ ease: EASE_OUT });
 
@@ -330,15 +329,9 @@
    *   进入：幕布压黑（此时 CSS 已瞬时切换布局）→ 幕布揭开 + HUD 滑入
    *   退出：幕布压黑 → 揭开恢复工作台
    * ─────────────────────────────────────────────────────────────────────*/
+  // #sceneVeil 由 index.html 固定提供，无需兜底创建
   function getSceneVeil() {
-    var veil = document.getElementById('sceneVeil');
-    if (!veil) {
-      veil = document.createElement('div');
-      veil.id = 'sceneVeil';
-      veil.setAttribute('aria-hidden', 'true');
-      document.body.appendChild(veil);
-    }
-    return veil;
+    return document.getElementById('sceneVeil');
   }
 
   function initLightTableTransition() {

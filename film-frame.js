@@ -388,17 +388,12 @@
 
   window.FilmFrame = Object.freeze({
     FORMATS: FORMAT_DEFINITIONS,
-    DEFAULT_TUNE,
     getFormat,
     getInputAdapter,
     createSingleFrameOptions,
-    renderSingleFrame,
     getSingleFrameRenderBounds,
     renderSingleFrameInBounds,
-    edgeFont120,
-    getEdgeMarkLayout120,
     drawEdgeTextTop120,
     drawEdgeTextBottom120,
-    buildSingleStripPath,
   });
 })();
