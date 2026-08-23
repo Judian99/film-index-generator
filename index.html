@@ -6,8 +6,34 @@
     <meta name="author" content="Judian99" />
     <meta name="contact" content="小红书:3661182800, 抖音:69530829181, 邮箱:1946378724@qq.com" />
     <meta name="license" content="MIT" />
+    <meta name="description" content="整理扫描底片，在浏览器本地生成可导出的胶片索引图。" />
     <title>海带索引图-FILM</title>
-    <link rel="stylesheet" href="styles.css" />
+    <script>
+      // 主题引导：首帧前确定暗/亮，避免闪色（默认跟随系统）
+      (function () {
+        var theme = "dark";
+        try {
+          var saved = localStorage.getItem("haidai-theme");
+          if (saved === "light" || saved === "dark") theme = saved;
+          else theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        } catch (e) {}
+        document.documentElement.dataset.theme = theme;
+        // 启动序列预隐藏：与 gsap-ui 初始态一致，避免脚本加载间隙的内容闪现
+        try {
+          if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+            document.documentElement.classList.add("anim-boot");
+            setTimeout(function () {
+              document.documentElement.classList.remove("anim-boot");
+            }, 1500);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23171310'/%3E%3Crect x='6' y='6' width='20' height='20' rx='2' fill='%23100d0a'/%3E%3Ccircle cx='16' cy='14' r='5' fill='%23e0a458'/%3E%3Crect x='8' y='22' width='16' height='1.6' fill='%23e0a458' opacity='.55'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" />
+    <link rel="stylesheet" href="styles.css?v=20260823-boot" />
   </head>
   <body>
     <main class="app-shell">
@@ -21,6 +47,15 @@
             </div>
             <p>整理扫描底片，生成可编辑、可导出的胶片索引图。</p>
           </div>
+          <button id="themeToggle" class="icon-button theme-toggle" type="button" aria-pressed="false" aria-label="切换到浅色模式">
+            <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4.4" />
+              <path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7" />
+            </svg>
+            <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.6 14.1A8.6 8.6 0 0 1 9.9 3.4a8.6 8.6 0 1 0 10.7 10.7z" />
+            </svg>
+          </button>
         </div>
 
         <details class="panel advanced-panel workflow-panel" id="sourcePanel" open>
@@ -295,26 +330,37 @@
             <h2 id="statusTitle">等待导入扫描件</h2>
           </div>
           <div class="preview-tools" aria-label="预览缩放">
-            <button id="zoomOut" class="icon-button" type="button" aria-label="缩小预览">-</button>
-            <label class="zoom-field">
-              <span>缩放</span>
-              <input id="zoomRange" type="range" min="25" max="200" step="5" value="55" />
-            </label>
-            <button id="zoomIn" class="icon-button" type="button" aria-label="放大预览">+</button>
-            <button id="zoomFit" class="text-button" type="button">适合</button>
-            <button id="lightTableButton" class="text-button light-table-entry" type="button" aria-pressed="false" disabled>
-              <span class="light-table-entry-aperture" aria-hidden="true"><span></span></span>
-              <span class="light-table-entry-label">
-                <strong>观片台</strong>
-                <small>LIGHT TABLE</small>
-              </span>
-            </button>
-            <button id="frameSelectButton" class="text-button" type="button" aria-pressed="false" disabled>选择单帧</button>
-            <button id="clearFrameSelectionButton" class="text-button" type="button" disabled>清除选择</button>
-            <button id="batchFrameExportButton" class="primary-button" type="button" disabled>批量导出</button>
-            <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
-            <div class="counter" id="frameSelectionCounter" aria-live="polite">已选 0 帧</div>
-            <div class="counter" id="imageCounter">0 张</div>
+            <div class="tool-group">
+              <button id="zoomOut" class="icon-button" type="button" aria-label="缩小预览">-</button>
+              <label class="zoom-field">
+                <span>缩放</span>
+                <input id="zoomRange" type="range" min="25" max="200" step="5" value="55" />
+              </label>
+              <button id="zoomIn" class="icon-button" type="button" aria-label="放大预览">+</button>
+              <button id="zoomFit" class="text-button" type="button">适合</button>
+            </div>
+
+            <div class="tool-group">
+              <button id="lightTableButton" class="text-button light-table-entry" type="button" aria-pressed="false" disabled>
+                <span class="light-table-entry-aperture" aria-hidden="true"><span></span></span>
+                <span class="light-table-entry-label">
+                  <strong>观片台</strong>
+                  <small>LIGHT TABLE</small>
+                </span>
+              </button>
+            </div>
+
+            <div class="tool-group">
+              <button id="frameSelectButton" class="text-button" type="button" aria-pressed="false" disabled>选择单帧</button>
+              <button id="clearFrameSelectionButton" class="text-button" type="button" disabled>清除选择</button>
+              <div class="counter" id="frameSelectionCounter" aria-live="polite">已选 0 帧</div>
+            </div>
+
+            <div class="tool-group">
+              <button id="batchFrameExportButton" class="primary-button" type="button" disabled>批量导出</button>
+              <button id="exportButton" class="primary-button" type="button" disabled>导出索引图</button>
+              <div class="counter" id="imageCounter">0 张</div>
+            </div>
           </div>
         </div>
 
@@ -322,6 +368,7 @@
           <canvas id="previewCanvas" tabindex="0" aria-label="海带索引图 FILM 预览"></canvas>
           <div class="optical-loupe" id="opticalLoupe" aria-hidden="true" hidden>
             <canvas id="opticalLoupeCanvas"></canvas>
+            <span class="loupe-frame-tag" id="loupeFrameTag" hidden></span>
           </div>
           <div class="empty-state" id="emptyState">
             <div class="film-stage" id="filmStage" data-film-state="intro">
@@ -374,6 +421,9 @@
         </div>
       </section>
     </main>
+
+    <!-- 场景过场黑场幕布（gsap-ui.js 控制透明度） -->
+    <div id="sceneVeil" aria-hidden="true"></div>
 
     <div class="notice" id="notice" role="status" aria-live="polite"></div>
 
@@ -544,8 +594,8 @@
     <script src="film-frame-135.js"></script>
     <script src="film-frame.js"></script>
     <script src="optical-loupe.js"></script>
-    <script src="app.js?v=20260724-light-table"></script>
-    <script src="gsap-ui.js"></script>
+    <script src="app.js?v=20260823-loupe"></script>
+    <script src="gsap-ui.js?v=20260823-boot"></script>
   </body>
 </html>
 

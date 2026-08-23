@@ -78,6 +78,7 @@
   const lightTableStatus = document.getElementById("lightTableStatus");
   const loupeMagnificationReadout = document.getElementById("loupeMagnification");
   const opticalLoupe = document.getElementById("opticalLoupe");
+const loupeFrameTag = document.getElementById("loupeFrameTag");
   const opticalLoupeCanvas = document.getElementById("opticalLoupeCanvas");
   const photoListPanel = document.getElementById("photoListPanel");
   const photoListCount = document.getElementById("photoListCount");
@@ -166,6 +167,10 @@
       hydrationRequestId: 0,
       activeItemId: null,
       samplePoint: null,
+      brightness: 100,
+      hudStatusTimer: 0,
+      pinch: null,
+      frameTagKey: "",
       transitionId: 0,
       session: null,
       sortedItems: null,
@@ -346,6 +351,13 @@
   // 观片器倍率（相对预览显示尺寸的线性放大）无极调节区间
   const LOUPE_MIN_MAGNIFICATION = 1;
   const LOUPE_MAX_MAGNIFICATION = 60;
+
+  // 观片台增强：档位预设 / 灯箱亮度区间 / HUD 自动淡出时长 / 长按选帧阈值
+  const LOUPE_MAG_PRESETS = [1, 4, 8, 16];
+  const LIGHTBOX_MIN_BRIGHTNESS = 70;
+  const LIGHTBOX_MAX_BRIGHTNESS = 115;
+  const HUD_IDLE_FADE_MS = 2800;
+  const LONG_PRESS_SELECT_MS = 480;
 
   const filmStageStates = {
     intro: {
@@ -597,6 +609,12 @@
   lightTableButton.addEventListener("click", toggleLightTable);
   lightTableExit.addEventListener("click", () => exitLightTable());
   previewWrap.addEventListener("wheel", onLoupeWheel, { passive: false });
+  // 双击循环倍率档位（1x→4x→8x→16x→1x）；修饰键双击属于选帧操作，不参与
+  previewWrap.addEventListener("dblclick", (event) => {
+    if (!state.lightTable.active || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    event.preventDefault();
+    cycleLoupePreset();
+  });
   previewWrap.addEventListener("pointermove", onLightTableSurfacePointerMove);
   previewWrap.addEventListener("pointerleave", onLightTableSurfacePointerLeave);
 
@@ -616,6 +634,31 @@
 
   function setLightTableStatus(message) {
     if (lightTableStatus.textContent !== message) lightTableStatus.textContent = message;
+    // 仅默认提示参与自动淡出；水合等过程性消息常驻
+    if (message === currentLightTableHint()) restartHudIdleFade();
+    else cancelHudIdleFade();
+  }
+
+  function currentLightTableHint() {
+    return matchMedia("(hover: hover) and (pointer: fine)").matches
+      ? "滚轮变倍 · 单击聚焦 · Ctrl+点击选帧 · 1-4 档位 · J/K 过片 · +/- 灯箱"
+      : "拖动平移 · 点按聚焦 · 长按照片选帧";
+  }
+
+  function restartHudIdleFade() {
+    cancelHudIdleFade();
+    state.lightTable.hudStatusTimer = window.setTimeout(() => {
+      state.lightTable.hudStatusTimer = 0;
+      document.body.classList.add("hud-idle");
+    }, HUD_IDLE_FADE_MS);
+  }
+
+  function cancelHudIdleFade() {
+    if (state.lightTable.hudStatusTimer) {
+      clearTimeout(state.lightTable.hudStatusTimer);
+      state.lightTable.hudStatusTimer = 0;
+    }
+    document.body.classList.remove("hud-idle");
   }
 
   function canEnterLightTable() {
@@ -720,6 +763,8 @@
     document.body.classList.remove("is-loupe-focus");
     lightTableHud.hidden = false;
     opticalLoupe.hidden = false;
+    applyLightboxBrightness();
+    restartHudIdleFade();
     syncLightTableControls();
     render();
     afterLightTableLayout(() => {
@@ -837,6 +882,7 @@
     if (state.lightTable.rafId) cancelAnimationFrame(state.lightTable.rafId);
     if (state.lightTable.resizeRafId) cancelAnimationFrame(state.lightTable.resizeRafId);
     clearTimeout(state.lightTable.hydrationTimer);
+    cancelHudIdleFade();
     state.lightTable.rafId = 0;
     state.lightTable.resizeRafId = 0;
     state.lightTable.hydrationTimer = 0;
@@ -846,6 +892,8 @@
     state.lightTable.samplePoint = null;
     state.lightTable.focusMode = false;
     state.lightTable.focusPan = null;
+    state.lightTable.pinch = null;
+    state.lightTable.frameTagKey = "";
     state.lightTable.pointerLockOwned = false;
     if (document.pointerLockElement === previewCanvas) document.exitPointerLock();
     state.lightTable.sortedItems = null;
@@ -862,6 +910,8 @@
     clearLoupeInteraction();
     state.lightTable.active = false;
     state.lightTable.session = null;
+    state.lightTable.brightness = 100;
+    previewWrap.style.removeProperty("background-color");
     document.body.classList.remove("is-light-table");
     lightTableHud.hidden = true;
     opticalLoupe.hidden = true;
@@ -893,7 +943,7 @@
     }
     const item = state.items.find((entry) => entry.id === state.lightTable.activeItemId);
     if (!item) {
-      setLightTableStatus(matchMedia("(hover: hover) and (pointer: fine)").matches ? "滚轮调节倍率 · 单击切换聚焦" : "点按画面定位观片器");
+      setLightTableStatus(currentLightTableHint());
     } else if (item.remote?.quality === "loading") {
       setLightTableStatus("正在获取原图…");
     } else if (item.remote && item.remote.quality !== "full") {
@@ -911,9 +961,108 @@
     scheduleLoupeFrame();
   }
 
+  /* ---- 观片台增强：档位 / 灯箱亮度 / 帧步进 / 帧信息浮标 ---- */
+
+  function applyLoupePreset(index) {
+    const preset = LOUPE_MAG_PRESETS[clamp(index, 0, LOUPE_MAG_PRESETS.length - 1)];
+    setLoupeMagnification(preset);
+    setLightTableStatus(`倍率档位 ${preset}X`);
+  }
+
+  function cycleLoupePreset() {
+    const current = state.lightTable.magnification;
+    const next = LOUPE_MAG_PRESETS.find((preset) => preset > current + 0.01) ?? LOUPE_MAG_PRESETS[0];
+    applyLoupePreset(LOUPE_MAG_PRESETS.indexOf(next));
+  }
+
+  // 灯箱亮度 → 桌面底色（70% 暖暗纸白 ~ 115% 纯白），镜片越界区域取同一颜色
+  function lightboxColor() {
+    const t = (state.lightTable.brightness - LIGHTBOX_MIN_BRIGHTNESS) / (LIGHTBOX_MAX_BRIGHTNESS - LIGHTBOX_MIN_BRIGHTNESS);
+    const mix = (from, to) => Math.round(from + (to - from) * t);
+    return `rgb(${mix(233, 255)}, ${mix(226, 255)}, ${mix(210, 252)})`;
+  }
+
+  function applyLightboxBrightness() {
+    previewWrap.style.backgroundColor = lightboxColor();
+  }
+
+  function setLightboxBrightness(value) {
+    const clamped = clamp(Math.round(value), LIGHTBOX_MIN_BRIGHTNESS, LIGHTBOX_MAX_BRIGHTNESS);
+    if (clamped === state.lightTable.brightness) return;
+    state.lightTable.brightness = clamped;
+    applyLightboxBrightness();
+    setLightTableStatus(`灯箱亮度 ${clamped}%`);
+    scheduleLoupeFrame();
+  }
+
+  // 帧间步进：把上/下一帧中心滚到镜心之下
+  function stepLightTableFrame(delta) {
+    const items = state.lightTable.sortedItems || (state.lightTable.sortedItems = getSortedItems());
+    if (!items.length || !state.frameRects.length) return;
+
+    const centers = state.frameRects.map((frame) => ({
+      id: frame.id,
+      x: frame.bounds.x + frame.bounds.w / 2,
+      y: frame.bounds.y + frame.bounds.h / 2,
+    }));
+
+    let currentIndex = centers.findIndex((center) => center.id === state.lightTable.activeItemId);
+    if (currentIndex < 0) {
+      const rect = previewCanvas.getBoundingClientRect();
+      const fallbackPoint = state.lightTable.samplePoint
+        || canvasPoint(loupeViewportCenter(), rect);
+      currentIndex = centers.reduce((best, center, index) => {
+        const distance = Math.hypot(center.x - fallbackPoint.x, center.y - fallbackPoint.y);
+        return distance < centers[best].distance ? { index, distance } : best;
+      }, { index: 0, distance: Infinity }).index;
+    }
+
+    const nextIndex = clamp(currentIndex + delta, 0, centers.length - 1);
+    if (nextIndex === currentIndex) {
+      setLightTableStatus(delta < 0 ? "已是第一帧" : "已是最后一帧");
+      restartHudIdleFade();
+      return;
+    }
+
+    const target = centers[nextIndex];
+    const canvasRect = previewCanvas.getBoundingClientRect();
+    const clientX = canvasRect.left + target.x * canvasRect.width / previewCanvas.width;
+    const clientY = canvasRect.top + target.y * canvasRect.height / previewCanvas.height;
+    previewWrap.scrollLeft += clientX - window.innerWidth / 2;
+    previewWrap.scrollTop += clientY - window.innerHeight / 2;
+
+    // 镜心即屏幕中心：非聚焦模式下也让镜片跳到该帧位置
+    state.lightTable.pointer = loupeViewportCenter();
+    scheduleLoupeFrame();
+
+    const steppedItem = items.find((entry) => entry.id === target.id);
+    if (steppedItem) syncLoupeFrameTag(steppedItem, true);
+    setLightTableStatus(`第 ${nextIndex + 1}/${centers.length} 帧 · ${steppedItem?.name ?? ""}`);
+  }
+
+  // 镜内帧信息浮标：仅在命中帧变化时写 DOM
+  function syncLoupeFrameTag(item, force = false) {
+    if (!loupeFrameTag) return;
+    if (!item) {
+      if (state.lightTable.frameTagKey !== "") {
+        state.lightTable.frameTagKey = "";
+        loupeFrameTag.hidden = true;
+      }
+      return;
+    }
+    const key = `${item.id}:${item.name}`;
+    if (!force && key === state.lightTable.frameTagKey) return;
+    state.lightTable.frameTagKey = key;
+    const items = state.lightTable.sortedItems;
+    const order = items ? items.findIndex((entry) => entry.id === item.id) + 1 : 0;
+    loupeFrameTag.textContent = order ? `第 ${order} 帧 · ${item.name}` : item.name;
+    loupeFrameTag.hidden = false;
+  }
+
   function onLoupeWheel(event) {
     if (!state.lightTable.active) return;
     event.preventDefault();
+    restartHudIdleFade();
     // 每 100 单位 deltaY 约 ±12% 倍率，向上滚放大。
     const factor = Math.exp(-event.deltaY * 0.0011);
     setLoupeMagnification(state.lightTable.magnification * factor);
@@ -934,6 +1083,8 @@
   function hideLoupe() {
     opticalLoupe.classList.remove("is-visible", "is-hydrating");
     previewWrap.classList.remove("has-optical-loupe");
+    state.lightTable.frameTagKey = "";
+    if (loupeFrameTag) loupeFrameTag.hidden = true;
     loupeRenderer.clear();
   }
 
@@ -1008,8 +1159,8 @@
       activeCanvas = tile;
       ctx = tileCtx;
       tileCtx.setTransform(1, 0, 0, 1, 0, 0);
-      // 观片台是无限白色底板：索引边界外仍保持白色，让镜片可自由越过边缘。
-      tileCtx.fillStyle = "#ffffff";
+      // 观片台是无限底板：索引边界外保持当前灯箱亮度色，让镜片可自由越过边缘。
+      tileCtx.fillStyle = lightboxColor();
       tileCtx.fillRect(0, 0, T, T);
       tileCtx.setTransform(G, 0, 0, G, T / 2 - centerIndexX * G, T / 2 - centerIndexY * G);
       tileCtx.save();
@@ -1068,6 +1219,7 @@
     const previousItemId = state.lightTable.activeItemId;
     state.lightTable.activeItemId = item ? item.id : null;
     if (item && previousItemId !== item.id) scheduleOriginalForLoupe(item);
+    syncLoupeFrameTag(item);
 
     const tile = renderLoupeTile(point.x, point.y);
     const drawn = tile && loupeRenderer.draw({ tile });
@@ -1085,7 +1237,9 @@
   }
 
   function scheduleLoupeFrame() {
-    if (!state.lightTable.active || state.lightTable.rafId) return;
+    if (!state.lightTable.active) return;
+    restartHudIdleFade();
+    if (state.lightTable.rafId) return;
     state.lightTable.rafId = requestAnimationFrame(drawLoupeFrame);
   }
 
@@ -1283,6 +1437,65 @@
   function onCanvasPointerDown(event) {
     if (event.button !== 0 || !state.items.length) return;
     if (state.lightTable.active) {
+      event.preventDefault();
+      // 触屏：双指进入捏合变倍；单指走轻点→平移，附长按选帧计时
+      if (event.pointerType === "touch") {
+        const pinch = state.lightTable.pinch
+          || (state.lightTable.pinch = { ids: [], points: new Map(), startDist: 0, startMag: state.lightTable.magnification });
+        pinch.points.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+        if (!pinch.ids.includes(event.pointerId)) pinch.ids.push(event.pointerId);
+        previewCanvas.setPointerCapture(event.pointerId);
+
+        if (pinch.ids.length >= 2) {
+          const previousDrag = state.canvasDrag;
+          if (previousDrag?.longPressTimer) clearTimeout(previousDrag.longPressTimer);
+          const [a, b] = pinch.ids.map((id) => pinch.points.get(id)).filter(Boolean);
+          pinch.startDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+          pinch.startMag = state.lightTable.magnification;
+          if (previousDrag) previousDrag.mode = "light-pinched";
+          else {
+            state.canvasDrag = {
+              mode: "light-pinched",
+              pointerId: event.pointerId,
+              pointerType: "touch",
+              startX: event.clientX,
+              startY: event.clientY,
+              scrollLeft: previewWrap.scrollLeft,
+              scrollTop: previewWrap.scrollTop,
+              longPressTimer: 0,
+            };
+          }
+          hideLoupe();
+          return;
+        }
+
+        state.canvasDrag = {
+          mode: "light-pending",
+          pointerId: event.pointerId,
+          pointerType: event.pointerType,
+          startX: event.clientX,
+          startY: event.clientY,
+          scrollLeft: previewWrap.scrollLeft,
+          scrollTop: previewWrap.scrollTop,
+          longPressTimer: 0,
+        };
+        const drag = state.canvasDrag;
+        const originPoint = canvasPoint(event);
+        drag.longPressTimer = window.setTimeout(() => {
+          if (state.canvasDrag !== drag || drag.mode !== "light-pending") return;
+          const hit = hitFrame(originPoint);
+          if (!hit) return;
+          drag.mode = "light-selected";
+          const selecting = !state.selectedFrameIds.has(hit.id);
+          toggleFrameSelection(hit.id);
+          navigator.vibrate?.(12);
+          setLightTableStatus(selecting
+            ? `已选 ${state.selectedFrameIds.size} 帧 · ${hit.item.name}`
+            : `已取消选择 · ${hit.item.name}`);
+        }, LONG_PRESS_SELECT_MS);
+        return;
+      }
+
       state.canvasDrag = {
         mode: "light-pending",
         pointerId: event.pointerId,
@@ -1291,10 +1504,10 @@
         startY: event.clientY,
         scrollLeft: previewWrap.scrollLeft,
         scrollTop: previewWrap.scrollTop,
+        longPressTimer: 0,
       };
       previewCanvas.setPointerCapture(event.pointerId);
-      if (event.pointerType !== "touch") hideLoupe();
-      event.preventDefault();
+      hideLoupe();
       return;
     }
     const hit = hitFrame(canvasPoint(event));
@@ -1318,6 +1531,20 @@
   function onCanvasPointerMove(event) {
     const drag = state.canvasDrag;
     if (state.lightTable.active) {
+      // 捏合中的触点：更新距离并换算倍率
+      const pinch = state.lightTable.pinch;
+      if (pinch?.ids.includes(event.pointerId)) {
+        if (!pinch.points.has(event.pointerId)) return;
+        pinch.points.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+        if (drag?.mode === "light-pinched" && pinch.ids.length >= 2) {
+          const [a, b] = pinch.ids.map((id) => pinch.points.get(id)).filter(Boolean);
+          if (a && b) {
+            const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+            setLoupeMagnification(pinch.startMag * distance / pinch.startDist);
+          }
+        }
+        return;
+      }
       if (!drag) {
         if (event.pointerType === "touch") return;
         state.lightTable.pointer = { clientX: event.clientX, clientY: event.clientY };
@@ -1328,6 +1555,10 @@
       if (event.pointerId !== drag.pointerId) return;
       const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
       if (drag.mode === "light-pending" && moved >= 6) {
+        if (drag.longPressTimer) {
+          clearTimeout(drag.longPressTimer);
+          drag.longPressTimer = 0;
+        }
         drag.mode = "light-pan";
         previewWrap.classList.add("is-panning");
         resetLoupeTarget({ clearPointer: event.pointerType === "touch" });
@@ -1377,15 +1608,43 @@
     if (!drag || event.pointerId !== drag.pointerId) return;
     if (state.lightTable.active) {
       const wasTap = drag.mode === "light-pending";
+      const wasSelected = drag.mode === "light-selected";
       const pointerType = drag.pointerType;
+      if (drag.longPressTimer) clearTimeout(drag.longPressTimer);
       cancelCanvasDrag();
+
+      // 捏合登记清理：任一手指抬起即结束捏合手势
+      const pinch = state.lightTable.pinch;
+      if (pinch?.ids.includes(event.pointerId)) {
+        pinch.ids = pinch.ids.filter((id) => id !== event.pointerId);
+        pinch.points.delete(event.pointerId);
+        if (pinch.ids.length < 2) {
+          state.lightTable.pinch = null;
+          restartHudIdleFade();
+        }
+        return;
+      }
+      if (wasSelected) return;
+
       if (wasTap) {
         const pointer = { clientX: event.clientX, clientY: event.clientY };
         state.lightTable.pointer = pointer;
+        // 修饰键点击 → 选帧（Shift 为范围选），否则切换聚焦
+        if (event.shiftKey || event.ctrlKey || event.metaKey) {
+          const hit = hitFrame(canvasPoint(event));
+          if (hit) {
+            toggleFrameSelection(hit.id, { range: event.shiftKey });
+            setLightTableStatus(`已选 ${state.selectedFrameIds.size} 帧 · ${hit.item.name}`);
+            scheduleLoupeFrame();
+            return;
+          }
+        }
         toggleFocusMode(pointer);
       } else if (pointerType !== "touch" && !state.lightTable.focusMode) {
         state.lightTable.pointer = { clientX: event.clientX, clientY: event.clientY };
         scheduleLoupeFrame();
+      } else {
+        restartHudIdleFade();
       }
       return;
     }
@@ -1421,12 +1680,20 @@
 
   function onCanvasPointerCancel() {
     const inLightTable = state.lightTable.active;
+    if (inLightTable) {
+      const pinch = state.lightTable.pinch;
+      if (pinch) {
+        // pointercancel 不带可靠 pointerId 过滤，直接结束捏合
+        state.lightTable.pinch = null;
+      }
+    }
     cancelCanvasDrag();
     if (inLightTable) resetLoupeTarget();
   }
 
   function cancelCanvasDrag() {
     const drag = state.canvasDrag;
+    if (drag?.longPressTimer) clearTimeout(drag.longPressTimer);
     if (drag && drag.ghost) drag.ghost.remove();
     const needsRedraw = state.dragItemId !== null || state.dropIndex !== null;
     state.canvasDrag = null;
@@ -2256,6 +2523,15 @@
   updateBackgroundControls();
 
   // 控件高频输入时防抖，避免每个 input 事件都全量重绘
+  // 渲染落定：新索引图浮现（配合 styles.css 的 canvasSettle 关键帧）
+  function playCanvasSettle() {
+    previewWrap.classList.add("is-rendering");
+    window.clearTimeout(state.settleTimer);
+    state.settleTimer = window.setTimeout(() => {
+      previewWrap.classList.remove("is-rendering");
+    }, 600);
+  }
+
   function scheduleRender() {
     window.clearTimeout(state.renderTimer);
     state.renderTimer = window.setTimeout(render, 80);
@@ -2276,7 +2552,11 @@
     statusTitle.textContent = `${rowCount} 行索引已生成`;
     imageCounter.textContent = `${items.length} 张`;
     emptyState.classList.add("is-hidden");
+    // 数量变化时播放渲染落定动画，微调滑块时不重复触发
+    const itemCountChanged = items.length !== state.renderedItemCount;
+    state.renderedItemCount = items.length;
     previewWrap.classList.remove("is-empty", "is-loading");
+    if (itemCountChanged) playCanvasSettle();
     exportButton.disabled = state.isExporting && !state.exportHydrationItems;
     syncFrameSelectionControls();
     if (state.lightTable.active) state.lightTable.sortedItems = items;
@@ -3338,6 +3618,23 @@
     ctx.restore();
   }
 
+  // 照片列表骨架行：批量导入解析期间占位（面板保持收起，仅摘要显示进度）
+  function showListSkeleton(count) {
+    const rows = Math.min(Math.max(count, 2), 8);
+    photoListPanel.hidden = false;
+    photoListCount.textContent = "读取中";
+    photoList.innerHTML = "";
+    for (let i = 0; i < rows; i += 1) {
+      const row = document.createElement("li");
+      row.className = "photo-skeleton";
+      row.setAttribute("aria-hidden", "true");
+      const thumb = document.createElement("i");
+      const name = document.createElement("i");
+      row.append(thumb, name);
+      photoList.appendChild(row);
+    }
+  }
+
   function renderPhotoList() {
     const itemCount = state.items.length;
     photoListPanel.hidden = itemCount === 0;
@@ -4082,6 +4379,43 @@
       toggleLightTable();
       return;
     }
+    // 观片台快捷键：1-4 档位 · J/K 或 ←/→ 过片 · +/- 灯箱亮度 · 0 适合
+    if (state.lightTable.active && !hasOpenModal() && !event.repeat
+      && !event.target.closest("input, select, textarea, [contenteditable='true']")
+      && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (/^[1-4]$/.test(event.key)) {
+        event.preventDefault();
+        applyLoupePreset(Number(event.key) - 1);
+        return;
+      }
+      const lowerKey = event.key.toLowerCase();
+      if (lowerKey === "j" || event.key === "ArrowRight") {
+        event.preventDefault();
+        stepLightTableFrame(1);
+        return;
+      }
+      if (lowerKey === "k" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        stepLightTableFrame(-1);
+        return;
+      }
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        setLightboxBrightness(state.lightTable.brightness + 5);
+        return;
+      }
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        setLightboxBrightness(state.lightTable.brightness - 5);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        fitLightTableToViewport();
+        setLightTableStatus(currentLightTableHint());
+        return;
+      }
+    }
     if (event.key !== "Tab") return;
     if (!exportModal.hidden) {
       const focusable = Array.from(exportModal.querySelectorAll("button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])"));
@@ -4574,6 +4908,8 @@
 
     statusTitle.textContent = "正在读取扫描件...";
     previewWrap.classList.add("is-loading");
+    // 批量导入时先展示骨架行，避免列表区域空白等待
+    if (imageFiles.length >= 4) showListSkeleton(imageFiles.length);
     if (!state.items.length) setFilmStageState("reading");
     exportButton.disabled = true;
 
@@ -5037,6 +5373,62 @@
 
   setupStockPanel();
   setupTunePanel();
+
+  // ---- 主题切换：默认跟随系统，手动选择后持久化 ----
+  const themeToggle = document.getElementById("themeToggle");
+  const THEME_KEY = "haidai-theme";
+
+  function getStoredTheme() {
+    try {
+      const value = localStorage.getItem(THEME_KEY);
+      return value === "light" || value === "dark" ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function systemPrefersDark() {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    if (themeToggle) {
+      themeToggle.setAttribute("aria-pressed", String(theme === "light"));
+      themeToggle.setAttribute(
+        "aria-label",
+        theme === "dark" ? "切换到浅色模式" : "切换到暗色模式"
+      );
+    }
+  }
+
+  applyTheme(getStoredTheme() ?? (systemPrefersDark() ? "dark" : "light"));
+
+  // 幕布轻闪：主题切换时的黑场过渡（尊重减少动态偏好）
+  function flashThemeVeil() {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const veil = document.getElementById("sceneVeil");
+    if (!veil) return;
+    veil.classList.add("is-flash");
+    window.setTimeout(() => veil.classList.remove("is-flash"), 170);
+  }
+
+  if (themeToggle) {
+    themeToggle.addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch {}
+      applyTheme(next);
+      flashThemeVeil();
+    });
+  }
+
+  // 未手动选择过时，实时跟随系统主题变化
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", (event) => {
+    if (!getStoredTheme()) applyTheme(event.matches ? "dark" : "light");
+  });
+
 
   // ---- 百度网盘集成 ----
   const API_BASE = (typeof BAIDU_PAN_API !== 'undefined')
