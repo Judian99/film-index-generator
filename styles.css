@@ -2243,6 +2243,8 @@ canvas {
   display: block;
   max-width: 100%;
   max-height: 460px;
+  /* 透明区域（含镂空齿孔）以灰白棋盘格示意 */
+  background: conic-gradient(#ffffff 0 25%, #e3e1db 0 50%, #ffffff 0 75%, #e3e1db 0) 0 0 / 36px 36px;
 }
 
 .frame-export-controls {

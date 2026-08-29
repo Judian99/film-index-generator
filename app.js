@@ -2506,7 +2506,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     backgroundBlurValue.value = `${backgroundBlur.value} px`;
     const item = getBackgroundItem();
     if (backgroundStyle.value === "transparent") {
-      backgroundHint.textContent = "预览以棋盘格显示透明区域；导出 PNG 为真实透明，JPG 按纯白底导出";
+      backgroundHint.textContent = "预览以棋盘格显示透明区域，齿孔真实镂空；导出 PNG 为真实透明，JPG 按纯白底导出";
     } else {
       backgroundHint.textContent = item
         ? `当前背景：${item.name}；点击单帧可更换`
@@ -3357,22 +3357,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     if (backgroundMode === "transparent" && !lightTable) {
       if (!preview) return;
       // 预览用灰白棋盘格示意透明区域，导出画布保持真实 alpha 透明
-      const cell = 18;
-      const startX = Math.floor(bounds.x / cell) * cell;
-      const startY = Math.floor(bounds.y / cell) * cell;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-      ctx.fillStyle = "#e3e1db";
-      for (let cy = startY; cy < bounds.y + bounds.height; cy += cell) {
-        for (let cx = startX; cx < bounds.x + bounds.width; cx += cell) {
-          if ((Math.round(cx / cell) + Math.round(cy / cell)) % 2 !== 0) continue;
-          const x = Math.max(cx, bounds.x);
-          const y = Math.max(cy, bounds.y);
-          const w = Math.min(cx + cell, bounds.x + bounds.width) - x;
-          const h = Math.min(cy + cell, bounds.y + bounds.height) - y;
-          ctx.fillRect(x, y, w, h);
-        }
-      }
+      FilmFrameShared.fillCheckerboard(ctx, bounds.x, bounds.y, bounds.width, bounds.height);
       return;
     }
     const pureWhite = lightTable || backgroundMode === "white";
@@ -3441,12 +3426,17 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       const sprocketOriginX = options.is120
         ? null
         : frameStartX - options.edgeMarkGap / 2 + options.sprocketPitch / 2 - options.sprocketHoleW / 2;
-      drawSprockets(stripX, bottomZoneY, stripW, options, null, sprocketOriginX);
+      // 透明背景：导出真实镂空，预览以棋盘格示意
+      const sprocketHoleMode = options.backgroundMode === "transparent"
+        ? (isPreview ? "checker" : "punch")
+        : "fill";
+      const sprocketOptions = { ...options, sprocketHoleMode };
+      drawSprockets(stripX, bottomZoneY, stripW, sprocketOptions, null, sprocketOriginX);
       if (rowInfo.leader) {
         const geo = leaderGeometry(stripX, y, stripH, options);
-        drawSprockets(stripX, topZoneY, stripW, options, geo.footX, sprocketOriginX);
+        drawSprockets(stripX, topZoneY, stripW, sprocketOptions, geo.footX, sprocketOriginX);
       } else {
-        drawSprockets(stripX, topZoneY, stripW, options, null, sprocketOriginX);
+        drawSprockets(stripX, topZoneY, stripW, sprocketOptions, null, sprocketOriginX);
       }
     }
 
@@ -3974,6 +3964,11 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
         { x: 0, y: 0, w: canvas.width, h: canvas.height },
       );
     }
+    // 画布未被填充（透明导出）时齿孔真实镂空，否则保持纸色填充
+    const canvasFilled = snapshot.backgroundMode === "white"
+      || mimeType === "image/jpeg"
+      || (snapshot.backgroundMode === "blur" && Boolean(snapshot.backgroundItem));
+    options.sprocketHoleMode = canvasFilled ? "fill" : "punch";
     FilmFrame.renderSingleFrameInBounds(outputCtx, snapshot.item, options, bounds);
     return { canvas, options, bounds };
   }

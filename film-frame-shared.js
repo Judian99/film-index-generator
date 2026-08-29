@@ -94,6 +94,26 @@
     ctx.stroke();
   }
 
+  /** 透明示意棋盘格：18px 灰白格，按全局网格锚定，保证多处绘制对齐 */
+  function fillCheckerboard(ctx, x, y, w, h) {
+    const cell = 18;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "#e3e1db";
+    const startX = Math.floor(x / cell) * cell;
+    const startY = Math.floor(y / cell) * cell;
+    for (let cy = startY; cy < y + h; cy += cell) {
+      for (let cx = startX; cx < x + w; cx += cell) {
+        if ((Math.round(cx / cell) + Math.round(cy / cell)) % 2 !== 0) continue;
+        const px = Math.max(cx, x);
+        const py = Math.max(cy, y);
+        const pw = Math.min(cx + cell, x + w) - px;
+        const ph = Math.min(cy + cell, y + h) - py;
+        ctx.fillRect(px, py, pw, ph);
+      }
+    }
+  }
+
   window.FilmFrameShared = Object.freeze({
     resolveTune,
     roundedRect,
@@ -103,5 +123,6 @@
     buildSingleStripPath,
     beginStripSurface,
     endStripSurface,
+    fillCheckerboard,
   });
 })();

@@ -33,6 +33,7 @@
     endStripSurface,
     buildSingleStripPath,
     setEdgeInk,
+    fillCheckerboard,
   } = Shared;
   const getTune = (options) => Shared.resolveTune(options, DEFAULT_TUNE_135);
 
@@ -216,6 +217,23 @@
       const hx = startX + index * pitch;
       if (leaderFootX !== null && hx + holeW * 1.75 < leaderFootX) continue;
       roundedRect(ctx, hx, holeY, holeW, holeH, holeR);
+      // 透明背景导出时齿孔为真实镂空；预览以棋盘格示意；其余背景保持纸色填充
+      const holeMode = options.sprocketHoleMode || "fill";
+      if (holeMode === "punch") {
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.fillStyle = "#000000";
+        ctx.fill();
+        ctx.restore();
+        continue;
+      }
+      if (holeMode === "checker") {
+        ctx.save();
+        ctx.clip();
+        fillCheckerboard(ctx, hx, holeY, holeW, holeH);
+        ctx.restore();
+        continue;
+      }
       ctx.fillStyle = "#f4eddf";
       ctx.fill();
       const inner = ctx.createLinearGradient(0, holeY, 0, holeY + holeH);
