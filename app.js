@@ -35,6 +35,7 @@
   const backgroundBlur = document.getElementById("backgroundBlur");
   const backgroundBlurValue = document.getElementById("backgroundBlurValue");
   const backgroundHint = document.getElementById("backgroundHint");
+  const showStripShadow = document.getElementById("showStripShadow");
   const stockSelect = document.getElementById("stockSelect");
   const stockSearch = document.getElementById("stockSearch");
   const stockSearchStatus = document.getElementById("stockSearchStatus");
@@ -508,6 +509,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     showLeader,
     backgroundStyle,
     backgroundBlur,
+    showStripShadow,
     columnsSelect,
     frameWidthInput,
     formatSelect,
@@ -2503,9 +2505,13 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     backgroundBlurField.classList.toggle("is-disabled", !enabled);
     backgroundBlurValue.value = `${backgroundBlur.value} px`;
     const item = getBackgroundItem();
-    backgroundHint.textContent = item
-      ? `当前背景：${item.name}；点击单帧可更换`
-      : "默认使用首图；点击单帧可将其设为背景";
+    if (backgroundStyle.value === "transparent") {
+      backgroundHint.textContent = "预览以棋盘格显示透明区域；导出 PNG 为真实透明，JPG 按纯白底导出";
+    } else {
+      backgroundHint.textContent = item
+        ? `当前背景：${item.name}；点击单帧可更换`
+        : "默认使用首图；点击单帧可将其设为背景";
+    }
   }
 
   function setBackgroundItem(itemId) {
@@ -2630,42 +2636,42 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     return buffer;
   }
 
-  function createPngHeader(width, height) {
+  function createPngHeader(width, height, colorType = 6) {
     const data = new Uint8Array(13);
     const view = new DataView(data.buffer);
     view.setUint32(0, width, false);
     view.setUint32(4, height, false);
     data[8] = 8;
-    data[9] = 2;
+    data[9] = colorType;
     data[10] = 0;
     data[11] = 0;
     data[12] = 0;
     return createPngChunk("IHDR", data);
   }
 
-  function getPngBandHeight(width, remainingHeight) {
-    const rowBytes = width * 3 + 1;
+  function getPngBandHeight(width, remainingHeight, bytesPerPixel = 4) {
+    const rowBytes = width * bytesPerPixel + 1;
     return Math.max(1, Math.min(remainingHeight, Math.floor(PNG_BAND_BYTES / rowBytes)));
   }
 
-  function copyTileToScanlines(imageData, scanlines, fullWidth, tileX, tileWidth, bandHeight) {
+  function copyTileToScanlines(imageData, scanlines, fullWidth, tileX, tileWidth, bandHeight, bytesPerPixel = 4) {
     const source = imageData.data;
-    const rowStride = fullWidth * 3 + 1;
+    const rowStride = fullWidth * bytesPerPixel + 1;
     for (let y = 0; y < bandHeight; y += 1) {
       let sourceOffset = y * tileWidth * 4;
-      let targetOffset = y * rowStride + 1 + tileX * 3;
+      let targetOffset = y * rowStride + 1 + tileX * bytesPerPixel;
       for (let x = 0; x < tileWidth; x += 1) {
-        scanlines[targetOffset] = source[sourceOffset];
-        scanlines[targetOffset + 1] = source[sourceOffset + 1];
-        scanlines[targetOffset + 2] = source[sourceOffset + 2];
+        for (let b = 0; b < bytesPerPixel; b += 1) {
+          scanlines[targetOffset + b] = source[sourceOffset + b];
+        }
         sourceOffset += 4;
-        targetOffset += 3;
+        targetOffset += bytesPerPixel;
       }
     }
   }
 
-  function applyPngPaethFilter(scanlines, width, height, previousRow = null) {
-    const pixelBytes = width * 3;
+  function applyPngPaethFilter(scanlines, width, height, previousRow = null, bytesPerPixel = 3) {
+    const pixelBytes = width * bytesPerPixel;
     const rowStride = pixelBytes + 1;
     let prior = previousRow || new Uint8Array(pixelBytes);
     let current = new Uint8Array(pixelBytes);
@@ -2675,9 +2681,9 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       current.set(scanlines.subarray(rowStart + 1, rowStart + rowStride));
       scanlines[rowStart] = 4;
       for (let x = 0; x < pixelBytes; x += 1) {
-        const left = x >= 3 ? current[x - 3] : 0;
+        const left = x >= bytesPerPixel ? current[x - bytesPerPixel] : 0;
         const up = prior[x];
-        const upLeft = x >= 3 ? prior[x - 3] : 0;
+        const upLeft = x >= bytesPerPixel ? prior[x - bytesPerPixel] : 0;
         scanlines[rowStart + 1 + x] =
           (current[x] - getPngPaethPredictor(left, up, upLeft)) & 0xff;
       }
@@ -2698,8 +2704,8 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     return upDistance <= upLeftDistance ? up : upLeft;
   }
 
-  async function renderPngBandRaw(items, options, layout, bandY, bandHeight) {
-    const rowBytes = layout.canvasW * 3 + 1;
+  async function renderPngBandRaw(items, options, layout, bandY, bandHeight, bytesPerPixel = 3) {
+    const rowBytes = layout.canvasW * bytesPerPixel + 1;
     const scanlines = new Uint8Array(rowBytes * bandHeight);
     const previousCanvas = activeCanvas;
     const previousCtx = ctx;
@@ -2727,7 +2733,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       try {
         drawLayout(items, options, layout, renderBounds);
         const pixels = tileCtx.getImageData(x - renderX, bandY - renderY, tileWidth, bandHeight);
-        copyTileToScanlines(pixels, scanlines, layout.canvasW, x, tileWidth, bandHeight);
+        copyTileToScanlines(pixels, scanlines, layout.canvasW, x, tileWidth, bandHeight, bytesPerPixel);
       } finally {
         activeCanvas = previousCanvas;
         ctx = previousCtx;
@@ -2738,7 +2744,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     return scanlines;
   }
 
-  async function exportStreamedPng(items, options, layout, sizeLabel) {
+  async function exportStreamedPng(items, options, layout, sizeLabel, bytesPerPixel = 3) {
     if (typeof CompressionStream !== "function") {
       throw new Error("PNG_STREAM_UNSUPPORTED");
     }
@@ -2753,7 +2759,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     const compression = new CompressionStream("deflate");
     const writer = compression.writable.getWriter();
     const reader = compression.readable.getReader();
-    const pngParts = [PNG_SIGNATURE, createPngHeader(layout.canvasW, layout.canvasH)];
+    const pngParts = [PNG_SIGNATURE, createPngHeader(layout.canvasW, layout.canvasH, bytesPerPixel === 4 ? 6 : 2)];
     let pngBytes = PNG_SIGNATURE.byteLength + 25;
     let previousRow = null;
     const consumeCompressed = (async () => {
@@ -2772,12 +2778,12 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     try {
       for (let y = 0; y < layout.canvasH;) {
         if (state.exportCancelled) throw new DOMException("Export cancelled", "AbortError");
-        const bandHeight = getPngBandHeight(layout.canvasW, layout.canvasH - y);
+        const bandHeight = getPngBandHeight(layout.canvasW, layout.canvasH - y, bytesPerPixel);
         const percent = Math.floor((y / layout.canvasH) * 100);
         exportButton.textContent = `取消导出（${percent}%）`;
         statusTitle.textContent = `正在无损压缩原图级 PNG ${percent}%`;
-        const scanlines = await renderPngBandRaw(items, options, layout, y, bandHeight);
-        previousRow = applyPngPaethFilter(scanlines, layout.canvasW, bandHeight, previousRow);
+        const scanlines = await renderPngBandRaw(items, options, layout, y, bandHeight, bytesPerPixel);
+        previousRow = applyPngPaethFilter(scanlines, layout.canvasW, bandHeight, previousRow, bytesPerPixel);
         await writer.write(scanlines);
         y += bandHeight;
         await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2913,6 +2919,10 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
         layout.canvasW * layout.canvasH > MAX_CANVAS_AREA;
       const items = getSortedItems();
       const mimeType = isFullResolution ? "image/png" : formatSelect.value;
+      if (mimeType === "image/jpeg" && options.backgroundMode === "transparent") {
+        showNotice("JPG 不支持透明背景，本次按纯白底导出");
+        options.backgroundMode = "white";
+      }
       const quality = Number(jpgQuality.value) / 100;
       const extension = mimeType === "image/jpeg" ? "jpg" : "png";
 
@@ -2921,7 +2931,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
           showNotice(`导出尺寸为 ${sizeLabel} 像素，超过浏览器画布上限，请降低输出质量或尺寸基准后重试`);
           return;
         }
-        await exportStreamedPng(items, options, layout, sizeLabel);
+        await exportStreamedPng(items, options, layout, sizeLabel, options.backgroundMode === "transparent" ? 4 : 3);
         return;
       }
 
@@ -3095,6 +3105,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       imageInSprockets: isWide135 && imageInSprockets.checked,
       imageInEdgeText: isWide135 && imageInEdgeText.checked,
       showLeader: showLeader.checked && !is120,
+      showStripShadow: showStripShadow.checked,
       backgroundMode: backgroundStyle.value,
       backgroundEnabled: backgroundStyle.value === "blur",
       backgroundBlurPx: clamp(Number(backgroundBlur.value) || 24, 8, 64) * scale,
@@ -3254,6 +3265,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     drawSheetBackground(layout.canvasW, layout.canvasH, cullRect, {
       lightTable: state.lightTable.active,
       backgroundMode: options.backgroundMode,
+      preview: activeCanvas === previewCanvas,
     });
     if (options.backgroundMode === "blur" && !state.lightTable.active) {
       const backgroundItem = getBackgroundItem(items);
@@ -3340,8 +3352,29 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     width,
     height,
     bounds = { x: 0, y: 0, width, height },
-    { lightTable = false, backgroundMode = "none" } = {},
+    { lightTable = false, backgroundMode = "none", preview = false } = {},
   ) {
+    if (backgroundMode === "transparent" && !lightTable) {
+      if (!preview) return;
+      // 预览用灰白棋盘格示意透明区域，导出画布保持真实 alpha 透明
+      const cell = 18;
+      const startX = Math.floor(bounds.x / cell) * cell;
+      const startY = Math.floor(bounds.y / cell) * cell;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      ctx.fillStyle = "#e3e1db";
+      for (let cy = startY; cy < bounds.y + bounds.height; cy += cell) {
+        for (let cx = startX; cx < bounds.x + bounds.width; cx += cell) {
+          if ((Math.round(cx / cell) + Math.round(cy / cell)) % 2 !== 0) continue;
+          const x = Math.max(cx, bounds.x);
+          const y = Math.max(cy, bounds.y);
+          const w = Math.min(cx + cell, bounds.x + bounds.width) - x;
+          const h = Math.min(cy + cell, bounds.y + bounds.height) - y;
+          ctx.fillRect(x, y, w, h);
+        }
+      }
+      return;
+    }
     const pureWhite = lightTable || backgroundMode === "white";
     ctx.fillStyle = pureWhite ? "#ffffff" : "#f7f1e6";
     ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
@@ -3847,6 +3880,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       stock: copyResolvedStock(renderOptions.stock),
       showEdgeText: renderOptions.showEdgeText,
       showSprockets: renderOptions.showSprockets,
+      showStripShadow: renderOptions.showStripShadow,
       imageInSprockets: renderOptions.imageInSprockets,
       imageInEdgeText: renderOptions.imageInEdgeText,
       tune: { ...TUNE },
@@ -3869,6 +3903,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       edgeMarkStartIndex: snapshot.frameNumber - 1,
       showEdgeText: snapshot.showEdgeText,
       showSprockets: snapshot.showSprockets,
+      showStripShadow: snapshot.showStripShadow,
       imageInSprockets: snapshot.imageInSprockets,
       imageInEdgeText: snapshot.imageInEdgeText,
       tune: snapshot.tune,
@@ -3895,7 +3930,9 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
 
   function getFrameExportLayout(snapshot, scale = getFrameExportScale(snapshot)) {
     const options = createFrameExportOptions(snapshot, scale);
-    const bounds = FilmFrame.getSingleFrameRenderBounds(options);
+    const bounds = FilmFrame.getSingleFrameRenderBounds(options, {
+      includeShadow: options.showStripShadow !== false,
+    });
     return { options, bounds, scale };
   }
 

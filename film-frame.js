@@ -195,6 +195,7 @@
       leaderAdvance: pxPerMm * FilmFrame135.FILM_135.frameAdvanceMm,
       showEdgeText: settings.showEdgeText !== false && Boolean(settings.stock.edgeText),
       showSprockets: settings.showSprockets !== false,
+      showStripShadow: settings.showStripShadow !== false,
       imageInSprockets: Boolean(settings.imageInSprockets),
       imageInEdgeText: Boolean(settings.imageInEdgeText),
       is120: false,
@@ -247,6 +248,7 @@
       leaderAdvance: slotW + slotGap,
       showEdgeText: settings.showEdgeText !== false && Boolean(settings.stock.edgeText),
       showSprockets: requestedSprockets,
+      showStripShadow: settings.showStripShadow !== false,
       imageInSprockets: false,
       imageInEdgeText: false,
       is120: true,
@@ -277,12 +279,13 @@
     showSprockets,
     imageInSprockets = false,
     imageInEdgeText = false,
+    showStripShadow,
     tune = DEFAULT_TUNE,
     edgeMarkStartIndex = null,
   }) {
     const format = getFormat(formatId);
     const inputAdapter = getInputAdapter(format.id, inputMode);
-    const settings = { frameW, stock, frameNumber, showEdgeText, showSprockets, imageInSprockets, imageInEdgeText, tune, edgeMarkStartIndex };
+    const settings = { frameW, stock, frameNumber, showEdgeText, showSprockets, imageInSprockets, imageInEdgeText, showStripShadow, tune, edgeMarkStartIndex };
     if (format.id === "135") {
       return {
         ...FilmFrame135.createSingleFrame135Options(settings),
@@ -375,7 +378,7 @@
     });
   }
 
-  function renderSingleFrameInBounds(ctx, item, options, bounds = getSingleFrameRenderBounds(options)) {
+  function renderSingleFrameInBounds(ctx, item, options, bounds = getSingleFrameRenderBounds(options, { includeShadow: options.showStripShadow !== false })) {
     return renderSingleFrame(ctx, item, options, { x: bounds.originX, y: bounds.originY });
   }
 

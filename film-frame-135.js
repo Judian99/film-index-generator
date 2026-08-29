@@ -309,6 +309,7 @@
     frameNumber = 1,
     showEdgeText = true,
     showSprockets = true,
+    showStripShadow,
     tune = DEFAULT_TUNE_135,
     edgeMarkStartIndex = null,
   }) {
@@ -346,6 +347,7 @@
       leaderAdvance: baseFrameW + slotGap,
       showEdgeText: showEdgeText && Boolean(stock.edgeText),
       showSprockets,
+      showStripShadow: showStripShadow !== false,
       imageInSprockets: false,
       imageInEdgeText: false,
       is120: false,

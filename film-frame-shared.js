@@ -54,14 +54,16 @@
 
   /** 条带底面：投影底层 + 渐变基色 + 斜向光泽（fill 后保持 clip 打开） */
   function beginStripSurface(ctx, x, y, stripW, stripH, options, buildPath) {
-    ctx.save();
-    ctx.shadowColor = "rgba(25, 20, 12, 0.35)";
-    ctx.shadowBlur = Math.round(options.frameW * 0.05);
-    ctx.shadowOffsetY = Math.round(options.frameW * 0.018);
-    buildPath(ctx, x, y, stripW, stripH);
-    ctx.fillStyle = "#131110";
-    ctx.fill();
-    ctx.restore();
+    if (options.showStripShadow !== false) {
+      ctx.save();
+      ctx.shadowColor = "rgba(25, 20, 12, 0.35)";
+      ctx.shadowBlur = Math.round(options.frameW * 0.05);
+      ctx.shadowOffsetY = Math.round(options.frameW * 0.018);
+      buildPath(ctx, x, y, stripW, stripH);
+      ctx.fillStyle = "#131110";
+      ctx.fill();
+      ctx.restore();
+    }
 
     ctx.save();
     buildPath(ctx, x, y, stripW, stripH);
