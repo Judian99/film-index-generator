@@ -2253,6 +2253,25 @@ canvas {
   gap: 16px;
 }
 
+.physical-toggle {
+  display: grid;
+  gap: 8px;
+}
+
+#physicalOptions {
+  display: grid;
+  gap: 16px;
+}
+
+#physicalOptions[hidden] {
+  display: none;
+}
+
+#physicalReadout p {
+  margin: 0;
+  white-space: pre-line;
+}
+
 .frame-export-controls .field {
   padding: 0;
 }

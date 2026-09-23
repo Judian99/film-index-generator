@@ -112,8 +112,18 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   const exportModal = document.getElementById("exportModal");
   const exportModalClose = document.getElementById("exportModalClose");
   const exportModalCancel = document.getElementById("exportModalCancel");
+  const exportModalPrint = document.getElementById("exportModalPrint");
   const exportModalConfirm = document.getElementById("exportModalConfirm");
   const exportMemoryWarning = document.getElementById("exportMemoryWarning");
+  const exportPhysical = document.getElementById("exportPhysical");
+  const physicalOptions = document.getElementById("physicalOptions");
+  const exportDpi = document.getElementById("exportDpi");
+  const physicalMarginField = document.getElementById("physicalMarginField");
+  const physicalMargin = document.getElementById("physicalMargin");
+  const exportCalibration = document.getElementById("exportCalibration");
+  const calibValue = document.getElementById("calibValue");
+  const physicalReadoutSize = document.getElementById("physicalReadoutSize");
+  const physicalReadoutDetail = document.getElementById("physicalReadoutDetail");
   const filmStage = document.getElementById("filmStage");
   const filmTitle = document.getElementById("filmTitle");
   const filmDescription = document.getElementById("filmDescription");
@@ -329,6 +339,43 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   const STORAGE_STOCKS_KEY = "filmIndex.customStocks";
   const STORAGE_SELECTED_KEY = "filmIndex.selectedStock";
 
+  const PRINT_CALIBRATION_KEY = "filmIndex.printCalibration";
+  const PRINT_DPI_KEY = "filmIndex.printDpi";
+  const PRINT_MARGIN_KEY = "filmIndex.printMargin";
+
+  function loadPrintSettings() {
+    const read = (key, fallback) => {
+      try {
+        const value = localStorage.getItem(key);
+        return value === null ? fallback : Number(value);
+      } catch {
+        return fallback;
+      }
+    };
+    const calibration = clamp(read(PRINT_CALIBRATION_KEY, 100) / 100, 0.9, 1.1);
+    const dpiValue = read(PRINT_DPI_KEY, 300);
+    const marginValue = read(PRINT_MARGIN_KEY, 8);
+    return {
+      calibration,
+      dpi: [150, 300, 600].includes(dpiValue) ? dpiValue : 300,
+      margin: [6, 8, 10, 12].includes(marginValue) ? marginValue : 8,
+    };
+  }
+
+  function persistPrintSetting(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // 隐私模式等场景下降级为仅本次会话生效
+    }
+  }
+
+  const printSettings = loadPrintSettings();
+  exportDpi.value = String(printSettings.dpi);
+  physicalMargin.value = String(printSettings.margin);
+  exportCalibration.value = String(Math.round(printSettings.calibration * 200) / 2);
+  calibValue.textContent = `${exportCalibration.value}%`;
+
   // 可调渲染参数（均为相对"单张宽度"或所在分区的比例）。
   // 侧栏"高级设置"菜单内有滑块可实时调整。
   const TUNE = {
@@ -535,6 +582,14 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   });
 
   function updateExportFormatControls() {
+    if (exportPhysical.checked) {
+      formatSelect.disabled = false;
+      qualityField.style.display = formatSelect.value === "image/jpeg" ? "grid" : "none";
+      if (!exportModal.hidden) {
+        updateExportMemoryWarning();
+      }
+      return;
+    }
     const fullResolution = exportScale.value === "full";
     if (fullResolution) formatSelect.value = "image/png";
     formatSelect.disabled = fullResolution;
@@ -549,27 +604,75 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   function updateExportMemoryWarning() {
     const items = getSortedItems();
     if (!items.length) { exportMemoryWarning.textContent = ""; return; }
-    const isFullResolution = exportScale.value === "full";
-    const scale = isFullResolution
-      ? getFullResolutionScale(items)
-      : clamp(Number(exportScale.value) || 1, 1, 3);
-    if (!Number.isFinite(scale) || scale <= 0) { exportMemoryWarning.textContent = ""; return; }
-    const exportLayout = getExportRenderLayout(items.length, scale);
-    const { options, pageLayout: layout } = exportLayout;
+
+    let layout;
+    let columns;
+    if (exportPhysical.checked) {
+      const physical = getPhysicalExportLayout(items.length);
+      layout = physical.layout;
+      columns = physical.meta.columns;
+    } else {
+      const isFullResolution = exportScale.value === "full";
+      const scale = isFullResolution
+        ? getFullResolutionScale(items)
+        : clamp(Number(exportScale.value) || 1, 1, 3);
+      if (!Number.isFinite(scale) || scale <= 0) { exportMemoryWarning.textContent = ""; return; }
+      const exportLayout = getExportRenderLayout(items.length, scale);
+      layout = exportLayout.pageLayout;
+      columns = exportLayout.options.columns;
+    }
     const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
     const estimatedPeakBytes = estimatedPixelBytes * 2;
     const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
     const memoryWarningThreshold = 500 * 1024 * 1024;
     const preset = exportPagePreset.value;
-    const paperName = "A4";
     const orientation = preset.endsWith("-landscape") ? "横向" : "竖向";
     if (estimatedPeakBytes > memoryWarningThreshold) {
       exportMemoryWarning.textContent = `⚠ 导出约需 ${estimatedPeakMB}MB 内存，老旧设备可能闪退，建议降低导出质量或减少照片`;
     } else if (preset !== "free") {
-      exportMemoryWarning.textContent = `${paperName} ${orientation}比例 · 自动每行 ${options.columns} 张 · ${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} px`;
+      const physicalPrefix = exportPhysical.checked ? "真实尺寸 · " : "";
+      exportMemoryWarning.textContent = `${physicalPrefix}A4 ${orientation} · 每行 ${columns} 张 · ${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} px`;
     } else {
       exportMemoryWarning.textContent = "";
     }
+  }
+
+  function updatePhysicalReadout() {
+    const items = getSortedItems();
+    if (!items.length) {
+      physicalReadoutSize.textContent = "—";
+      physicalReadoutDetail.textContent = "请先添加照片";
+      return;
+    }
+    const { layout, meta } = getPhysicalExportLayout(items.length);
+    const preset = exportPagePreset.value;
+    if (meta.pageCount > 1) {
+      physicalReadoutSize.textContent = `A4 × ${meta.pageCount} 页 · 每页 ${meta.columns} 列`;
+    } else if (preset === "free") {
+      physicalReadoutSize.textContent = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} px`;
+    } else {
+      physicalReadoutSize.textContent = `A4 单页 · ${meta.columns} 列`;
+    }
+    let detail = `单帧 ${meta.frameMm} mm（校准 ${Math.round(meta.calibration * 100)}%）\n本批 ${items.length} 张`;
+    if (meta.pageCount > 1) {
+      detail += `\n画布高 = ${meta.pageCount} 页 A4，页间不会切断胶片帧，打印须选实际大小`;
+    }
+    if (preset === "free") {
+      const heightMm = layout.canvasH / PrintPhysical.getPxPerMm(meta.dpi, meta.calibration);
+      if (heightMm > 297) {
+        detail += "\n高度超过一张 A4，free 模式可能在任意位置切开，建议改用 A4 比例";
+      }
+    }
+    physicalReadoutDetail.textContent = detail;
+  }
+
+  function updatePhysicalControls() {
+    const on = exportPhysical.checked;
+    physicalOptions.hidden = !on;
+    exportScale.disabled = on;
+    physicalMarginField.hidden = exportPagePreset.value === "free";
+    updateExportFormatControls();
+    if (on) updatePhysicalReadout();
   }
 
   function openExportModal() {
@@ -578,7 +681,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       showNotice("请先完成当前导出");
       return;
     }
-    updateExportFormatControls();
+    updatePhysicalControls();
     updateExportMemoryWarning();
     exportModal.hidden = false;
     document.body.style.overflow = "hidden";
@@ -591,8 +694,29 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   }
 
   exportScale.addEventListener("change", updateExportFormatControls);
-  exportPagePreset.addEventListener("change", updateExportMemoryWarning);
+  exportPagePreset.addEventListener("change", () => {
+    physicalMarginField.hidden = exportPhysical.checked && exportPagePreset.value === "free";
+    updateExportMemoryWarning();
+    if (exportPhysical.checked) updatePhysicalReadout();
+  });
   formatSelect.addEventListener("change", updateExportFormatControls);
+  exportPhysical.addEventListener("change", updatePhysicalControls);
+  exportDpi.addEventListener("change", () => {
+    persistPrintSetting(PRINT_DPI_KEY, exportDpi.value);
+    updatePhysicalReadout();
+    updateExportMemoryWarning();
+  });
+  physicalMargin.addEventListener("change", () => {
+    persistPrintSetting(PRINT_MARGIN_KEY, physicalMargin.value);
+    updatePhysicalReadout();
+    updateExportMemoryWarning();
+  });
+  exportCalibration.addEventListener("input", () => {
+    calibValue.textContent = `${exportCalibration.value}%`;
+    persistPrintSetting(PRINT_CALIBRATION_KEY, exportCalibration.value);
+    updatePhysicalReadout();
+    updateExportMemoryWarning();
+  });
 
   zoomRange.addEventListener("input", () => {
     setPreviewZoom(Number(zoomRange.value) / 100);
@@ -1286,6 +1410,10 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   exportModalConfirm.addEventListener("click", async () => {
     closeExportModal();
     await exportIndexImage();
+  });
+  exportModalPrint.addEventListener("click", async () => {
+    closeExportModal();
+    await printIndexImage();
   });
 
   clearButton.addEventListener("click", () => {
@@ -2824,6 +2952,19 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     });
   }
 
+  // 物理模式：PNG 注入 pHYs，JPG 改写 JFIF 密度。密度用标称 DPI（画布始终锚定纸张）
+  async function embedPhysicalMetadata(blob, mimeType, meta) {
+    const buffer = await blob.arrayBuffer();
+    if (mimeType === "image/png") {
+      const pxPerMeter = PrintPhysical.dpiToPxPerMeter(meta.dpi);
+      const chunk = PrintPhysical.buildPhysChunk(pxPerMeter);
+      const bytes = PrintPhysical.injectPngChunk(new Uint8Array(buffer), chunk, 33);
+      return new Blob([bytes], { type: "image/png" });
+    }
+    const { bytes } = PrintPhysical.patchJpegDensity(new Uint8Array(buffer), meta.dpi);
+    return new Blob([bytes], { type: "image/jpeg" });
+  }
+
   function downloadBlob(blob, filename) {
     const link = document.createElement("a");
     const objectUrl = URL.createObjectURL(blob);
@@ -2856,45 +2997,93 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     });
   }
 
+  // 按当前控件状态构建输出方案（导出与打印共用）
+  function buildArtworkPlan(itemCount) {
+    const isPhysical = exportPhysical.checked;
+    const isFullResolution = !isPhysical && exportScale.value === "full";
+    const scale = isFullResolution
+      ? getFullResolutionScale(state.items)
+      : isPhysical
+        ? 1
+        : clamp(Number(exportScale.value) || 1, 1, 3);
+    if (!isPhysical && (!Number.isFinite(scale) || scale <= 0)) {
+      throw new Error("INVALID_EXPORT_SCALE");
+    }
+    const exportLayout = isPhysical
+      ? getPhysicalExportLayout(itemCount)
+      : getExportRenderLayout(itemCount, scale);
+    const layout = isPhysical ? exportLayout.layout : exportLayout.pageLayout;
+    return {
+      isPhysical,
+      isFullResolution,
+      options: exportLayout.options,
+      layout,
+      meta: exportLayout.meta || null,
+      sizeLabel: `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()}`,
+    };
+  }
+
+  // 离屏渲染整幅作品，完成后恢复原有活动画布
+  function renderArtworkToCanvas(items, options, layout) {
+    const previousCanvas = activeCanvas;
+    const previousCtx = ctx;
+    const outputCanvas = document.createElement("canvas");
+    const outputCtx = outputCanvas.getContext("2d");
+    if (!outputCtx) throw new Error("Canvas 2D context unavailable");
+    activeCanvas = outputCanvas;
+    ctx = outputCtx;
+    try {
+      drawLayout(items, options, layout);
+    } finally {
+      activeCanvas = previousCanvas;
+      ctx = previousCtx;
+    }
+    return outputCanvas;
+  }
+
+  // 原图准备（导出与打印共用）：全部获取原图后返回照片列表；失败返回 null
+  async function prepareArtworkSources() {
+    state.exportHydrationItems = [...state.items];
+    const failures = await ensureAllOriginals(state.exportHydrationItems, "导出准备");
+    state.exportHydrationItems = null;
+    if (failures.length) {
+      const names = failures.slice(0, 3).map(({ item }) => item.name).join("、");
+      showNotice(`导出已取消：${failures.length} 张原图获取失败${names ? `（${names}）` : ""}`);
+      render();
+      return null;
+    }
+    if (state.items.some((item) => item.remote && item.remote.quality !== "full")) {
+      showNotice("导出已取消：仍有照片未获取原图");
+      render();
+      return null;
+    }
+    return getSortedItems();
+  }
+
   async function exportIndexImage() {
     const originalButtonText = exportButton.textContent;
     const originalButtonDisabled = exportButton.disabled;
     state.isExporting = true;
     state.exportCancelled = false;
     setSourceEditingLocked(true);
-    state.exportHydrationItems = [...state.items];
     exportButton.textContent = "取消原图下载";
 
     try {
-      const failures = await ensureAllOriginals(state.exportHydrationItems, "导出准备");
-      state.exportHydrationItems = null;
-      if (failures.length) {
-        const names = failures.slice(0, 3).map(({ item }) => item.name).join("、");
-        showNotice(`导出已取消：${failures.length} 张原图获取失败${names ? `（${names}）` : ""}`);
-        render();
-        return;
-      }
-      if (state.items.some((item) => item.remote && item.remote.quality !== "full")) {
-        showNotice("导出已取消：仍有照片未获取原图");
-        render();
-        return;
-      }
+      const items = await prepareArtworkSources();
+      if (!items) return;
 
       render();
       exportButton.textContent = "正在导出...";
       exportButton.disabled = true;
-      const isFullResolution = exportScale.value === "full";
-      const scale = isFullResolution
-        ? getFullResolutionScale(state.items)
-        : clamp(Number(exportScale.value) || 1, 1, 3);
-      if (!Number.isFinite(scale) || scale <= 0) {
+
+      let plan;
+      try {
+        plan = buildArtworkPlan(state.items.length);
+      } catch {
         showNotice("导出失败：无法计算有效的输出尺寸");
         return;
       }
-
-      const exportLayout = getExportRenderLayout(state.items.length, scale);
-      const { options, pageLayout: layout } = exportLayout;
-      const sizeLabel = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()}`;
+      const { isPhysical, isFullResolution, options, layout, meta, sizeLabel } = plan;
 
       // 预估内存占用：RGBA 原始像素 + 编码缓冲（约 1.5–2 倍）
       const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
@@ -2917,7 +3106,6 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
         layout.canvasW > MAX_CANVAS_SIDE ||
         layout.canvasH > MAX_CANVAS_SIDE ||
         layout.canvasW * layout.canvasH > MAX_CANVAS_AREA;
-      const items = getSortedItems();
       const mimeType = isFullResolution ? "image/png" : formatSelect.value;
       if (mimeType === "image/jpeg" && options.backgroundMode === "transparent") {
         showNotice("JPG 不支持透明背景，本次按纯白底导出");
@@ -2928,40 +3116,39 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
 
       if (exceedsCanvasLimit) {
         if (!isFullResolution) {
-          showNotice(`导出尺寸为 ${sizeLabel} 像素，超过浏览器画布上限，请降低输出质量或尺寸基准后重试`);
+          const limitMessage = isPhysical
+            ? `真实尺寸导出为 ${sizeLabel} 像素，超过浏览器画布上限（300DPI 约 4 页），请降至 150DPI 或减少照片数量`
+            : `导出尺寸为 ${sizeLabel} 像素，超过浏览器画布上限，请降低输出质量或尺寸基准后重试`;
+          showNotice(limitMessage);
           return;
         }
         await exportStreamedPng(items, options, layout, sizeLabel, options.backgroundMode === "transparent" ? 4 : 3);
         return;
       }
 
-      const previousCanvas = activeCanvas;
-      const previousCtx = ctx;
       let outputCanvas;
-
       try {
-        outputCanvas = document.createElement("canvas");
-        const outputCtx = outputCanvas.getContext("2d");
-        if (!outputCtx) throw new Error("Canvas 2D context unavailable");
-        activeCanvas = outputCanvas;
-        ctx = outputCtx;
-        drawLayout(items, options, layout);
+        outputCanvas = renderArtworkToCanvas(items, options, layout);
       } catch (error) {
         console.error("导出画布绘制失败", error);
         showNotice(getExportFailureMessage("draw", isFullResolution, sizeLabel));
         return;
-      } finally {
-        activeCanvas = previousCanvas;
-        ctx = previousCtx;
       }
 
       try {
-        const blob = await canvasToBlob(outputCanvas, mimeType, quality);
+        let blob = await canvasToBlob(outputCanvas, mimeType, quality);
+        if (isPhysical) blob = await embedPhysicalMetadata(blob, mimeType, meta);
         const pagePart = getExportPageFilenamePart();
         const filename = ["film-index", pagePart, new Date().toISOString().slice(0, 10)]
           .filter(Boolean)
           .join("-");
         downloadBlob(blob, `${filename}.${extension}`);
+        if (isPhysical) {
+          const pageText = meta.pageCount > 1
+            ? `，共 ${meta.pageCount} 页`
+            : "";
+          showNotice(`已按 ${meta.dpi} DPI 真实尺寸导出，单帧 ${meta.frameMm} mm${pageText}（打印请选实际大小）`);
+        }
       } catch (error) {
         console.error("导出画布编码失败", error);
         showNotice(getExportFailureMessage("encode", isFullResolution, sizeLabel));
@@ -2977,6 +3164,160 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
         console.error("导出失败", error);
         showNotice("原图级 PNG 拼接失败，请降低尺寸基准、减少照片或改用 3x 后重试");
       }
+    } finally {
+      state.isExporting = false;
+      state.exportCancelled = false;
+      state.exportHydrationItems = null;
+      setSourceEditingLocked(false);
+      updateFrameModeControls();
+      updateExportFormatControls();
+      exportButton.textContent = originalButtonText;
+      exportButton.disabled = originalButtonDisabled;
+      render();
+    }
+  }
+
+  // 隐藏 iframe + @page 直连系统打印机；按逻辑页分页，页边界不切帧
+  function printArtwork(canvas, layout, { isPhysical, preset }) {
+    return new Promise((resolve) => {
+      const dataUrl = canvas.toDataURL("image/png");
+      const iframe = document.createElement("iframe");
+      iframe.setAttribute("aria-hidden", "true");
+      // 用 0 尺寸而非 display:none，部分浏览器要求 iframe 可渲染才允许打印
+      iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+
+      let pageSize;
+      let sheets;
+      if (preset !== "free") {
+        const landscape = preset.endsWith("-landscape");
+        const pw = landscape ? 297 : 210;
+        const ph = landscape ? 210 : 297;
+        pageSize = landscape ? "A4 landscape" : "A4";
+        sheets = layout.pages.map((_, i) => ({ pw, ph, top: -i * ph }));
+      } else {
+        // 自定义纸张：物理模式按标称打印密度换算，其余按 96DPI
+        const pxPerMm = isPhysical
+          ? PrintPhysical.getPxPerMm(loadPrintSettings().dpi)
+          : 96 / 25.4;
+        const wMm = roundTo(canvas.width / pxPerMm, 2);
+        const hMm = roundTo(canvas.height / pxPerMm, 2);
+        pageSize = `${wMm}mm ${hMm}mm`;
+        sheets = [{ pw: wMm, ph: hMm, top: 0 }];
+      }
+
+      const sheetHtml = sheets.map((sheet) => `
+        <div class="print-sheet" style="width:${sheet.pw}mm;height:${sheet.ph}mm">
+          <img alt="" src="${dataUrl}" style="width:${sheet.pw}mm;top:${sheet.top}mm">
+        </div>`).join("");
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>打印胶片索引图</title>
+<style>
+@page { size: ${pageSize}; margin: 0; }
+html, body { margin: 0; padding: 0; background: #ffffff; }
+.print-sheet { position: relative; overflow: hidden; break-after: page; }
+.print-sheet:last-child { break-after: auto; }
+.print-sheet img { position: absolute; left: 0; display: block; }
+</style></head><body>${sheetHtml}</body></html>`;
+
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.setTimeout(() => iframe.remove(), 300);
+        resolve();
+      };
+
+      // 在 iframe 元素上监听 load：srcdoc 导航会替换内部 Window，元素事件不受影响
+      iframe.addEventListener("load", async () => {
+        const printWindow = iframe.contentWindow;
+        const printDoc = printWindow.document;
+        // 等待 data URL 图片加载完成（不用 img.decode，规避个别浏览器不返回）
+        const pending = [...printDoc.images].filter((img) => !img.complete);
+        if (pending.length) {
+          await new Promise((done) => {
+            let remaining = pending.length;
+            const tick = () => { remaining -= 1; if (remaining === 0) done(); };
+            pending.forEach((img) => {
+              img.addEventListener("load", tick, { once: true });
+              img.addEventListener("error", tick, { once: true });
+            });
+          });
+        }
+        printWindow.addEventListener("afterprint", finish, { once: true });
+        printWindow.focus();
+        printWindow.print();
+        window.setTimeout(finish, 120000); // afterprint 不触发时兜底
+      }, { once: true });
+
+      // 先赋 srcdoc 再插入文档，确保元素 load 唯一对应 srcdoc（而非 about:blank）
+      iframe.srcdoc = html;
+      document.body.appendChild(iframe);
+    });
+  }
+
+  function roundTo(value, decimals) {
+    const factor = 10 ** decimals;
+    return Math.round(value * factor) / factor;
+  }
+
+  async function printIndexImage() {
+    const originalButtonText = exportButton.textContent;
+    const originalButtonDisabled = exportButton.disabled;
+    state.isExporting = true;
+    state.exportCancelled = false;
+    setSourceEditingLocked(true);
+    exportButton.textContent = "取消原图下载";
+
+    try {
+      const items = await prepareArtworkSources();
+      if (!items) return;
+
+      render();
+      exportButton.textContent = "正在准备打印...";
+      exportButton.disabled = true;
+
+      let plan;
+      try {
+        plan = buildArtworkPlan(state.items.length);
+      } catch {
+        showNotice("打印失败：无法计算有效的输出尺寸");
+        return;
+      }
+      const { isPhysical, options, layout, meta } = plan;
+
+      // 打印必须在一张完整画布内完成，不支持流式
+      const exceeds =
+        layout.canvasW > MAX_CANVAS_SIDE ||
+        layout.canvasH > MAX_CANVAS_SIDE ||
+        layout.canvasW * layout.canvasH > MAX_CANVAS_AREA;
+      if (exceeds) {
+        showNotice("打印尺寸超过浏览器画布上限，请降低输出质量、DPI 或减少照片数量");
+        return;
+      }
+      if (options.backgroundMode === "transparent" && formatSelect.value === "image/jpeg") {
+        showNotice("JPG 不支持透明背景，本次按纯白底打印");
+        options.backgroundMode = "white";
+      }
+
+      let outputCanvas;
+      try {
+        outputCanvas = renderArtworkToCanvas(items, options, layout);
+      } catch (error) {
+        console.error("打印画布绘制失败", error);
+        showNotice("打印失败：浏览器无法创建该尺寸画布，请降低输出质量或减少照片数量");
+        return;
+      }
+
+      await printArtwork(outputCanvas, layout, {
+        isPhysical,
+        preset: exportPagePreset.value,
+      });
+      if (isPhysical) {
+        const pageText = meta.pageCount > 1 ? `，共 ${meta.pageCount} 页` : "";
+        showNotice(`打印任务已发送，单帧 ${meta.frameMm} mm${pageText}，请在打印对话框选择打印机`);
+      }
+    } catch (error) {
+      console.error("打印失败", error);
+      showNotice("打印失败，请重试");
     } finally {
       state.isExporting = false;
       state.exportCancelled = false;
@@ -3112,6 +3453,247 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       leaderW: baseFrameW + normalGap,
       leaderAdvance,
       stock,
+    };
+  }
+
+  // 物理模式渲染选项：字段与 getRenderOptions 对齐，所有几何按毫米×pxPerMm（含校准）计算
+  function getPhysicalRenderOptions(pxPerMm, columns) {
+    const format = getFormat();
+    const is120 = format.family === "120";
+    const isHalfFrame = isHalfFrameMode();
+    const isCroppedHalfFrame = isCroppedHalfFrameMode();
+    const isWide135 = format.family === "135" && Boolean(format.wide);
+
+    const anchorW = Math.round(36 * pxPerMm); // 135 齿孔/边字带几何锚点，不随半格缩小
+
+    let slotW;
+    let slotH;
+    let normalGap;
+    let sprocketH;
+    let textH;
+    let textSprocketShift;
+    let bandH;
+    let stripPadX;
+    let sprocketPitch;
+    let sprocketHoleW;
+
+    if (is120) {
+      slotH = Math.round(56 * pxPerMm);
+      slotW = Math.round(format.imageWidthMm * pxPerMm);
+      normalGap = Math.round(56 * TUNE.gap120 * pxPerMm);
+      stripPadX = Math.round(56 * 0.05 * pxPerMm);
+      sprocketPitch = pxPerMm * 4.75;
+      sprocketHoleW = Math.round(2.8 * pxPerMm);
+    } else {
+      slotH = Math.round(24 * pxPerMm);
+      slotW = isCroppedHalfFrame
+        ? Math.round(18 * pxPerMm)
+        : isWide135
+          ? Math.round(format.imageWidthMm * pxPerMm)
+          : anchorW;
+      normalGap = Math.round((isCroppedHalfFrame ? 1 : 2) * pxPerMm);
+      stripPadX = Math.round(3 * pxPerMm);
+      sprocketPitch = pxPerMm * FILM_135.sprocketPitchMm;
+      sprocketHoleW = Math.round(anchorW * TUNE.holeW);
+    }
+
+    const stock = resolveStock(getActiveStock());
+    const showSprocketHoles = showSprockets.checked && (!is120 || stock.sprocketsIn120);
+
+    if (is120) {
+      sprocketH = showSprocketHoles ? Math.round(slotH * 0.09) : 0;
+      textH = Math.round(slotH * TUNE.band120);
+      textSprocketShift = showSprocketHoles
+        ? Math.min(Math.round(slotH * TUNE.textSprocketGap120), textH)
+        : 0;
+      bandH = Math.max(sprocketH + textH - textSprocketShift, Math.round(slotH * 0.02));
+    } else {
+      const minimumBandH = Math.round(5.5 * pxPerMm);
+      textH = Math.round(anchorW * TUNE.textH);
+      sprocketH = Math.round(anchorW * TUNE.sprocketH);
+      textSprocketShift = Math.min(Math.round(anchorW * TUNE.textSprocketGap), textH);
+      bandH = Math.max(sprocketH + textH - textSprocketShift, minimumBandH);
+    }
+
+    const slotGap = normalGap;
+    const frameAreaW = columns * slotW + (columns - 1) * slotGap;
+    const leaderAdvance = isCroppedHalfFrame
+      ? 2 * (slotW + slotGap)
+      : anchorW + normalGap;
+    const leaderCapacity = isCroppedHalfFrame
+      ? 10
+      : isWide135
+        ? Math.max(1, Math.floor((frameAreaW - leaderAdvance + slotGap) / (slotW + slotGap)))
+        : Math.max(1, columns - 1);
+
+    const previewPxPerMm = clamp(Number(frameWidthInput.value) || 420, 180, 1200) / 36;
+
+    return {
+      frameW: anchorW,
+      frameH: slotH,
+      baseFrameW: anchorW,
+      baseFrameH: slotH,
+      ratio: format.ratio,
+      gap: normalGap,
+      slotW,
+      slotH,
+      slotGap,
+      slotCount: columns,
+      normalCapacity: columns,
+      leaderCapacity,
+      frameAreaW,
+      edgeMarkW: anchorW,
+      edgeMarkGap: is120 ? normalGap : slotGap,
+      edgeMarkSlotSpan: isCroppedHalfFrame ? 2 : 1,
+      isHalfFrame,
+      isCroppedHalfFrame,
+      isWide135,
+      is120,
+      bandH,
+      sprocketH,
+      textH,
+      textSprocketShift,
+      sprocketPitch,
+      sprocketHoleW,
+      stripPadX,
+      sheetPad: Math.round(6.5 * pxPerMm),
+      rowGap: Math.round(5 * pxPerMm),
+      columns,
+      showEdgeText: showEdgeText.checked && Boolean(stock.edgeText),
+      showSprockets: showSprocketHoles,
+      imageInSprockets: isWide135 && imageInSprockets.checked,
+      imageInEdgeText: isWide135 && imageInEdgeText.checked,
+      showLeader: showLeader.checked && !is120,
+      showStripShadow: showStripShadow.checked,
+      backgroundMode: backgroundStyle.value,
+      backgroundEnabled: backgroundStyle.value === "blur",
+      backgroundBlurPx: Math.round(
+        (clamp(Number(backgroundBlur.value) || 24, 8, 64) / previewPxPerMm) * pxPerMm,
+      ),
+      leaderW: anchorW + normalGap,
+      leaderAdvance,
+      stock,
+      physical: true,
+    };
+  }
+
+  // 物理模式打包器：替代 getExportRenderLayout/createExportPageLayout/scoreExportLayout
+  function getPhysicalExportLayout(itemCount) {
+    const { calibration, dpi, margin: marginMm } = loadPrintSettings();
+    const preset = exportPagePreset.value;
+    const isA4 = preset !== "free";
+    const format = getFormat();
+    const is120 = format.family === "120";
+    const isHalfFrame = isHalfFrameMode();
+    const isCroppedHalfFrame = isCroppedHalfFrameMode();
+    // 画布按标称密度锚定纸张；胶片条内容含校准系数，校准才能改变帧与纸面的相对比例
+    const nominalPxPerMm = PrintPhysical.getPxPerMm(dpi);
+    const contentPxPerMm = PrintPhysical.getPxPerMm(dpi, calibration);
+
+    let slotWMm;
+    let gapMm;
+    let stripPadXMm;
+    if (is120) {
+      slotWMm = format.imageWidthMm;
+      gapMm = 56 * TUNE.gap120;
+      stripPadXMm = 56 * 0.05;
+    } else {
+      slotWMm = isCroppedHalfFrame ? 18 : format.imageWidthMm;
+      gapMm = isCroppedHalfFrame ? 1 : 2;
+      stripPadXMm = 3;
+    }
+
+    const minimumColumns = isHalfFrame && !isCroppedHalfFrame ? 4 : 2;
+    let columns;
+    if (isA4) {
+      const orientation = preset.endsWith("-landscape") ? "landscape" : "portrait";
+      const pageMm = PrintPhysical.PAGE_A4_MM[orientation];
+      columns = PrintPhysical.fitColumns(
+        pageMm.w - marginMm * 2 - stripPadXMm * 2,
+        slotWMm,
+        gapMm,
+      );
+      columns = clamp(columns, minimumColumns, 8);
+    } else {
+      columns = clamp(Number(columnsSelect.value) || 6, minimumColumns, 8);
+    }
+
+    const options = getPhysicalRenderOptions(contentPxPerMm, columns);
+    const rows = buildRows(itemCount, options);
+    const stripH = options.bandH * 2 + options.slotH;
+    const stripHMm = stripH / contentPxPerMm;
+
+    let canvasW;
+    let canvasH;
+    let rowYs;
+    let contentX;
+    let pages;
+
+    if (!isA4) {
+      const stripW = options.frameAreaW + options.stripPadX * 2;
+      canvasW = Math.round(stripW + options.sheetPad * 2);
+      canvasH = Math.round(
+        rows.length * stripH + (rows.length - 1) * options.rowGap + options.sheetPad * 2,
+      );
+      rowYs = PrintPhysical.planRowYs(rows.length, {
+        isA4: false,
+        sheetPadPx: options.sheetPad,
+        stripHPx: stripH,
+        rowGapPx: options.rowGap,
+      });
+      contentX = 0;
+      pages = [{ y: 0, w: canvasW, h: canvasH }];
+    } else {
+      const orientation = preset.endsWith("-landscape") ? "landscape" : "portrait";
+      const pageMm = PrintPhysical.PAGE_A4_MM[orientation];
+      const pageWPx = Math.round(pageMm.w * nominalPxPerMm);
+      const pageHPx = Math.round(pageMm.h * nominalPxPerMm);
+      const marginPx = Math.round(marginMm * nominalPxPerMm);
+      const rowsPerPage = PrintPhysical.fitRows(
+        pageMm.h - marginMm * 2,
+        stripHMm,
+        options.rowGap / contentPxPerMm,
+      );
+      rowYs = PrintPhysical.planRowYs(rows.length, {
+        isA4: true,
+        pageHPx,
+        marginPx,
+        stripHPx: stripH,
+        rowGapPx: options.rowGap,
+        rowsPerPage,
+      });
+      const pageCount = Math.ceil(rows.length / rowsPerPage);
+      pages = Array.from({ length: pageCount }, (_, p) => ({
+        y: p * pageHPx,
+        w: pageWPx,
+        h: pageHPx,
+      }));
+      // 胶片条在固定 A4 画布内水平居中（k>1 超出时两侧等比出血）
+      const stripW = options.frameAreaW + options.stripPadX * 2;
+      const stripLeft = Math.round((pageWPx - stripW) / 2);
+      canvasW = pageWPx;
+      canvasH = pageCount * pageHPx;
+      contentX = stripLeft - options.sheetPad;
+    }
+
+    const layout = {
+      rows,
+      stripW: options.frameAreaW + options.stripPadX * 2,
+      stripH,
+      canvasW,
+      canvasH,
+      outerMargin: 0,
+      rowYs,
+      contentX,
+      pages,
+      pagePreset: preset,
+    };
+    const round1 = (value) => Math.round(value * 10) / 10;
+    const frameMm = `${round1(options.slotW / contentPxPerMm)} × ${round1(options.slotH / contentPxPerMm)}`;
+    return {
+      options,
+      layout,
+      meta: { columns, dpi, calibration, frameMm, pageCount: pages.length },
     };
   }
 
@@ -3285,7 +3867,9 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     if (buildHitData) state.frameRects = [];
 
     layout.rows.forEach((rowInfo, row) => {
-      const y = (layout.contentY || 0) + options.sheetPad + row * (layout.stripH + options.rowGap);
+      const y = layout.rowYs
+        ? layout.rowYs[row]
+        : (layout.contentY || 0) + options.sheetPad + row * (layout.stripH + options.rowGap);
       const shadowPad = options.frameW * 0.08;
       if (y + layout.stripH + shadowPad < cullRect.y || y - shadowPad > cullRect.y + cullRect.height) return;
       const rowItems = items.slice(rowInfo.start, rowInfo.start + rowInfo.count);

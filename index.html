@@ -583,11 +583,51 @@
               <span>JPG 质量</span>
               <input id="jpgQuality" type="range" min="70" max="100" value="92" />
             </label>
+            <div class="physical-toggle">
+              <label class="checkbox-row">
+                <input id="exportPhysical" type="checkbox" />
+                <span>真实尺寸打印（按毫米锚定）</span>
+              </label>
+              <small class="field-hint">按真实底片尺寸渲染（135 标准帧 = 36 × 24 mm）并写入打印密度。打印时请选“实际大小 / 100%”并关闭无边距；若使用“适合纸张”，用下方校准补偿</small>
+            </div>
+            <div id="physicalOptions" hidden>
+              <label class="field">
+                <span>打印 DPI</span>
+                <select id="exportDpi">
+                  <option value="150">150（草稿）</option>
+                  <option value="300" selected>300（标准打印）</option>
+                  <option value="600">600（高精度，内存占用大）</option>
+                </select>
+              </label>
+              <label class="field" id="physicalMarginField">
+                <span>安全页边距</span>
+                <select id="physicalMargin">
+                  <option value="6">6 mm</option>
+                  <option value="8" selected>8 mm（推荐）</option>
+                  <option value="10">10 mm（喷墨机保守值）</option>
+                  <option value="12">12 mm</option>
+                </select>
+                <small class="field-hint">按打印机不可打印区域预留，A4 内容只在安全区内排布</small>
+              </label>
+              <label class="field">
+                <span class="field-label-with-value">
+                  <span>打印校准</span>
+                  <output id="calibValue">100%</output>
+                </span>
+                <input id="exportCalibration" type="range" min="90" max="110" step="0.5" value="100" />
+                <small class="field-hint">先按 100% 导出一张并实测帧宽：实测偏大则调低，偏小则调高，设置自动记住</small>
+              </label>
+              <div class="frame-export-info" id="physicalReadout">
+                <strong id="physicalReadoutSize">—</strong>
+                <p id="physicalReadoutDetail">—</p>
+              </div>
+            </div>
           </div>
         </div>
         <p id="exportMemoryWarning" class="export-warning" aria-live="polite"></p>
         <div class="frame-export-footer">
           <button type="button" class="text-button" id="exportModalCancel">取消</button>
+          <button type="button" class="text-button" id="exportModalPrint">打印</button>
           <button type="button" class="primary-button" id="exportModalConfirm">确认导出</button>
         </div>
       </div>
@@ -599,8 +639,9 @@
     <script src="film-frame-shared.js?v=20260823-shared"></script>
     <script src="film-frame-135.js?v=20260823-shared"></script>
     <script src="film-frame.js?v=20260823-shared"></script>
+    <script src="print-physical.js?v=20260923-print"></script>
     <script src="optical-loupe.js"></script>
-    <script src="app.js?v=20260823-loupe"></script>
+    <script src="app.js?v=20260923-print"></script>
     <script src="gsap-ui.js?v=20260823-cleanup"></script>
   </body>
 </html>
