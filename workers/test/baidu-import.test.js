@@ -368,6 +368,54 @@ test('callback falls back to the frontend origin when FRONTEND_URL is unset', as
   }
 });
 
+/**
+ * EdgeOne Makers 运行时的 URLSearchParams 对字典里的非字符串值直接抛错：
+ *   "Dict initializer must be keyed and valued on string type"
+ * Node 与 Cloudflare 会隐式转换，所以在本地跑不出这个错误 ——
+ * 这个桩把那套严格行为搬进测试，否则断言再多也挡不住回归。
+ */
+class StrictURLSearchParams extends URLSearchParams {
+  constructor(init) {
+    if (init && typeof init === 'object' && !Array.isArray(init) && !(init instanceof URLSearchParams)) {
+      for (const [key, value] of Object.entries(init)) {
+        if (typeof value !== 'string') {
+          throw new TypeError(`Dict initializer must be keyed and valued on string type. (${key})`);
+        }
+      }
+    }
+    super(init);
+  }
+}
+
+test('download survives Makers throwing on non-string URLSearchParams values', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  const originalURLSearchParams = globalThis.URLSearchParams;
+  globalThis.URLSearchParams = StrictURLSearchParams;
+  globalThis.fetch = async input => {
+    const url = requestUrl(input);
+    calls.push(url);
+    if (url.searchParams.get('method') === 'filemetas') {
+      return jsonResponse({ errno: 0, list: [{ dlink: 'https://dlink.test/f?id=7' }] });
+    }
+    return new Response(PNG_BYTES, { headers: { 'Content-Type': 'image/png' } });
+  };
+
+  try {
+    const response = await workerRequest('/download?fs_id=7', await authCookie());
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('Content-Type'), 'image/png');
+
+    const meta = calls.find(u => u.searchParams.get('method') === 'filemetas');
+    assert.ok(meta, 'should request file metadata');
+    assert.equal(meta.searchParams.get('dlink'), '1');
+    assert.equal(meta.searchParams.get('fsids'), '[7]');
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.URLSearchParams = originalURLSearchParams;
+  }
+});
+
 test('COOKIE_SAME_SITE defaults to None and can be switched to Lax', async () => {
   const defaults = await workerRequest('/logout', await authCookie());
   assert.match(defaults.headers.get('Set-Cookie') || '', /SameSite=None/);

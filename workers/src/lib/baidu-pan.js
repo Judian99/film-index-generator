@@ -135,11 +135,14 @@ export async function listImages(accessToken, path = '/') {
  * 获取文件下载链接
  */
 export async function getDownloadUrl(accessToken, fsId) {
+  // dlink 必须是字符串：EdgeOne Makers 运行时的 URLSearchParams 拒绝非字符串值
+  // （抛 "Dict initializer must be keyed and valued on string type"），
+  // 而 Node / Cloudflare 会隐式转换，所以本地和测试都发现不了。
   const params = new URLSearchParams({
     method: 'filemetas',
     access_token: accessToken,
     fsids: `[${fsId}]`,
-    dlink: 1
+    dlink: '1'
   });
 
   const url = `${BAIDU_API.FILE_META}?${params.toString()}`;
