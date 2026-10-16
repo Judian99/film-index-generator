@@ -8,7 +8,11 @@ export const DEFAULT_FRONTEND_ORIGIN = 'https://www.filmindex.site';
 export const DEFAULT_SAME_SITE = 'None';
 
 export function resolveOrigin(env) {
-  return env?.FRONTEND_ORIGIN || DEFAULT_FRONTEND_ORIGIN;
+  const raw = env?.FRONTEND_ORIGIN;
+  if (typeof raw !== 'string' || !raw.trim()) return DEFAULT_FRONTEND_ORIGIN;
+  // 去掉结尾斜杠。浏览器发出的 Origin 头不带斜杠，带上就永远匹配不到，
+  // 表现为「CORS 配了却依然被拒」；顺带避免 FRONTEND_URL 回落时拼出双斜杠。
+  return raw.trim().replace(/\/+$/, '');
 }
 
 /**

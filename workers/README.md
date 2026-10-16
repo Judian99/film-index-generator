@@ -1,6 +1,7 @@
 # 百度网盘照片导入功能 - 部署指南
 
-本目录包含 Cloudflare Workers API 代理服务，用于实现百度网盘照片导入功能。
+本目录包含百度网盘照片导入的后端代理服务。生产环境跑在 EdgeOne Makers 上
+（适配层在仓库根目录的 `edge-functions/`），也可部署到 Cloudflare Workers 作为回退。
 
 ---
 
@@ -29,6 +30,122 @@ Cloudflare Workers (本目录)   →    EdgeOne Makers 边缘函数 (edge-functi
 > ⚠️ 方式 B 用的是 **EdgeOne Makers** 的边缘函数，入口是 `export default onRequest(context)`。
 > 它和「边缘安全加速平台 EO」的**站点级边缘函数**（`addEventListener`）是两套不兼容的接口。
 > 混用会导致函数完全不生效，且表现为一个普通 404，很难察觉。辨析方法见部署方式 B 开头。
+
+---
+
+## 部署方式 B：EdgeOne Makers 边缘函数（同域）
+
+适用于「前端通过腾讯云 EdgeOne 加速 + 自定义域名对外提供服务」的场景。
+API 以 `/api` 前缀挂在同一域名下，前端无需跨域访问。
+
+### 先确认你的站点跑在哪个产品上
+
+EdgeOne 有**两套互不兼容**的边缘函数接口，选错直接跑不起来：
+
+| | 站点级边缘函数 | EdgeOne Makers 边缘函数 |
+|---|---|---|
+| 入口签名 | `addEventListener('fetch', ...)` | `export default onRequest(context)` |
+| 环境变量 | 全局 `env` | `context.env` |
+| 代码组织 | 控制台单文件编辑 | 项目 `edge-functions/` 目录，由 Git/CLI 部署 |
+| 路由 | 在触发规则里配 URL Path | 由目录结构自动生成 |
+
+**怎么区分**：打一个不存在的路径，看响应头。
+
+```bash
+curl -i https://你的域名/api/nope
+```
+
+返回 `Server: edgeone makers`、错误页指向 `pages.edgeone.ai` → 你的站点在 **Makers** 上，
+下文即为此方案。若能在「边缘安全加速平台 EO → 站点 → 边缘函数」下建函数，
+说明走的是站点级方案，本仓库不再提供该适配。
+
+> Makers 官方文档明确写了 **「Edge Functions 不支持使用 addEventListener」**，
+> 两套接口不能混用。站点级那套单文件适配器曾经存在过，已从仓库移除。
+
+### 部署结构
+
+函数只有一个文件，位于仓库根目录：
+
+```
+edge-functions/
+└── api/
+    └── [[default]].js   ← 接管 /api/* 全部路径
+```
+
+路由由目录结构生成，所以 `/api` 前缀是「放对目录」换来的，不用配触发规则。
+该文件只做一层适配，把请求转交给 `workers/src/index.js`，
+因此 Cloudflare Workers 与 Makers 共用同一份业务代码。
+
+### 步骤 1：推送代码
+
+Makers 项目已关联 Git 仓库，**推送即自动构建部署**，不需要往控制台粘贴任何代码：
+
+```bash
+git push origin main
+```
+
+推送后可在控制台「部署记录」里看到本次构建。实测从推送到线上生效约 **1 分钟**。
+
+### 步骤 2：配置环境变量与密钥
+
+在 **EdgeOne Makers 控制台 → 你的项目 → 环境变量**（不是 EO 站点控制台）。
+
+只有 3 个是必需的，且都应建为 **Secret** 类型：
+
+| 变量名 | 填什么 |
+|--------|--------|
+| `BAIDU_CLIENT_ID` | 百度控制台的 **AppKey**（⚠️ **不是 AppID**） |
+| `BAIDU_CLIENT_SECRET` | 百度控制台的 **SecretKey** |
+| `TOKEN_ENCRYPTION_KEY` | 32 个 ASCII 字符的随机串，自备 |
+
+以下变量**有内置默认值，通常不必配**，需要覆盖时再建：
+
+| 变量名 | 默认值 | 何时需要 |
+|--------|--------|----------|
+| `FRONTEND_ORIGIN` | `https://www.filmindex.site` | 换域名时；同时决定 CORS 放行的来源 |
+| `FRONTEND_URL` | `FRONTEND_ORIGIN` + `/` | 授权后要跳到别处时 |
+| `COOKIE_SAME_SITE` | `None` | 同域部署可改 `Lax`，更抗浏览器策略变化 |
+| `API_BASE_PATH` | 由适配器写死 `/api` | 不需要配 |
+
+> ⚠️ **`client_id` 填 AppKey 而不是 AppID** 是百度这边最常见的坑：填 AppID 时授权页照常打开
+> （那一端不校验），但换 token 会失败，且报错信息指向不了根因。
+
+### 步骤 3：改百度回调地址并重新授权
+
+在百度开放平台应用详情页的【安全配置】里，把授权回调地址改为：
+
+```
+https://www.filmindex.site/api/callback
+```
+
+必须与线上实际地址**逐字一致**，否则换 token 会被拒。改完后**必须重新走一次授权**——
+旧 Cookie 是按旧回调地址换来的。
+
+### 免费版配额
+
+| 项 | 免费版 |
+|----|--------|
+| Edge Functions 执行次数 | 300 万次/月 |
+| Edge Functions CPU 时间 | 300 万 ms/月 |
+| 代码包大小 | 5 MB |
+| 请求 body 大小 | 1 MB |
+| 项目构建次数 | 500 次/月（并发 1，单次最长 20 分钟） |
+
+官方文档**没有给出**内存规格与单次执行超时——这两个数在站点级产品里是有的
+（128 MB / 200 ms CPU），不要套用到 Makers 上。免费版目前为限时免费，
+官方声明商业化后配额可能调整。
+
+`/download` 走流式转发（`new Response(response.body, ...)`），大文件不会被读进内存。
+
+### 排障
+
+Makers 免费版**没有日志分析/离线日志**，比 `wrangler tail` 难查。可用手段：
+
+1. `curl https://你的域名/api/status` —— 预期 `{"logged_in":false,"user":null}`。
+   若返回 EdgeOne 的 404 错误页，说明请求没被路由到函数：检查
+   `edge-functions/api/` 目录层级是否拼对、以及项目是否真的重新构建过。
+2. 控制台 → 项目 → **部署记录**，确认构建成功且函数被识别。
+3. 本地调试：`edgeone makers link` 关联项目后跑 `edgeone makers dev`（默认 8088 端口）。
 
 ---
 
@@ -121,122 +238,6 @@ https://film-index-baidu-pan.workers.dev/callback
 
 ---
 
-## 部署方式 B：EdgeOne Makers 边缘函数（同域）
-
-适用于「前端通过腾讯云 EdgeOne 加速 + 自定义域名对外提供服务」的场景。
-API 以 `/api` 前缀挂在同一域名下，前端无需跨域访问。
-
-### 先确认你的站点跑在哪个产品上
-
-EdgeOne 有**两套互不兼容**的边缘函数接口，选错直接跑不起来：
-
-| | 站点级边缘函数 | EdgeOne Makers 边缘函数 |
-|---|---|---|
-| 入口签名 | `addEventListener('fetch', ...)` | `export default onRequest(context)` |
-| 环境变量 | 全局 `env` | `context.env` |
-| 代码组织 | 控制台单文件编辑 | 项目 `edge-functions/` 目录，由 Git/CLI 部署 |
-| 路由 | 在触发规则里配 URL Path | 由目录结构自动生成 |
-
-**怎么区分**：打一个不存在的路径，看响应头。
-
-```bash
-curl -i https://你的域名/api/nope
-```
-
-返回 `Server: edgeone makers`、错误页指向 `pages.edgeone.ai` → 你的站点在 **Makers** 上，
-下文即为此方案。若能在「边缘安全加速平台 EO → 站点 → 边缘函数」下建函数，
-说明走的是站点级方案，本仓库不再提供该适配。
-
-> Makers 官方文档明确写了 **「Edge Functions 不支持使用 addEventListener」**，
-> 两套接口不能混用。站点级那套单文件适配器曾经存在过，已从仓库移除。
-
-### 部署结构
-
-函数只有一个文件，位于仓库根目录：
-
-```
-edge-functions/
-└── api/
-    └── [[default]].js   ← 接管 /api/* 全部路径
-```
-
-路由由目录结构生成，所以 `/api` 前缀是「放对目录」换来的，不用配触发规则。
-该文件只做一层适配，把请求转交给 `workers/src/index.js`，
-因此 Cloudflare Workers 与 Makers 共用同一份业务代码。
-
-### 步骤 1：推送代码
-
-Makers 项目已关联 Git 仓库，**推送即自动构建部署**，不需要往控制台粘贴任何代码：
-
-```bash
-git push origin main
-```
-
-推送后可在控制台「部署记录」里看到本次构建。实测从推送到线上生效约 10 分钟。
-
-### 步骤 2：配置环境变量与密钥
-
-在 **EdgeOne Makers 控制台 → 你的项目 → 环境变量**（不是 EO 站点控制台）。
-
-只有 3 个是必需的，且都应建为 **Secret** 类型：
-
-| 变量名 | 填什么 |
-|--------|--------|
-| `BAIDU_CLIENT_ID` | 百度控制台的 **AppKey**（⚠️ **不是 AppID**） |
-| `BAIDU_CLIENT_SECRET` | 百度控制台的 **SecretKey** |
-| `TOKEN_ENCRYPTION_KEY` | 32 个 ASCII 字符的随机串，自备 |
-
-以下变量**有内置默认值，通常不必配**，需要覆盖时再建：
-
-| 变量名 | 默认值 | 何时需要 |
-|--------|--------|----------|
-| `FRONTEND_ORIGIN` | `https://www.filmindex.site` | 换域名时；同时决定 CORS 放行的来源 |
-| `FRONTEND_URL` | `FRONTEND_ORIGIN` + `/` | 授权后要跳到别处时 |
-| `COOKIE_SAME_SITE` | `None` | 同域部署可改 `Lax`，更抗浏览器策略变化 |
-| `API_BASE_PATH` | 由适配器写死 `/api` | 不需要配 |
-
-> ⚠️ **`client_id` 填 AppKey 而不是 AppID** 是百度这边最常见的坑：填 AppID 时授权页照常打开
-> （那一端不校验），但换 token 会失败，且报错信息指向不了根因。
-
-### 步骤 3：改百度回调地址并重新授权
-
-在百度开放平台应用详情页的【安全配置】里，把授权回调地址改为：
-
-```
-https://www.filmindex.site/api/callback
-```
-
-必须与线上实际地址**逐字一致**，否则换 token 会被拒。改完后**必须重新走一次授权**——
-旧 Cookie 是按旧回调地址换来的。
-
-### 免费版配额
-
-| 项 | 免费版 |
-|----|--------|
-| Edge Functions 执行次数 | 300 万次/月 |
-| Edge Functions CPU 时间 | 300 万 ms/月 |
-| 代码包大小 | 5 MB |
-| 请求 body 大小 | 1 MB |
-| 项目构建次数 | 500 次/月（并发 1，单次最长 20 分钟） |
-
-官方文档**没有给出**内存规格与单次执行超时——这两个数在站点级产品里是有的
-（128 MB / 200 ms CPU），不要套用到 Makers 上。免费版目前为限时免费，
-官方声明商业化后配额可能调整。
-
-`/download` 走流式转发（`new Response(response.body, ...)`），大文件不会被读进内存。
-
-### 排障
-
-Makers 免费版**没有日志分析/离线日志**，比 `wrangler tail` 难查。可用手段：
-
-1. `curl https://你的域名/api/status` —— 预期 `{"logged_in":false,"user":null}`。
-   若返回 EdgeOne 的 404 错误页，说明请求没被路由到函数：检查
-   `edge-functions/api/` 目录层级是否拼对、以及项目是否真的重新构建过。
-2. 控制台 → 项目 → **部署记录**，确认构建成功且函数被识别。
-3. 本地调试：`edgeone makers link` 关联项目后跑 `edgeone makers dev`（默认 8088 端口）。
-
----
-
 ## 本地开发测试
 
 ### 启动本地 Workers
@@ -250,10 +251,11 @@ wrangler dev
 
 ### 修改前端配置
 
-临时修改 `baidu-pan-config.js` 指向本地：
+本地起前端时 `baidu-pan-config.js` 会自动指向 `http://localhost:8787`（见该文件的
+hostname 判断），通常不用改。要指向别处才填 `BAIDU_PAN_API_OVERRIDE`：
 
 ```javascript
-var BAIDU_PAN_API = 'http://localhost:8787';
+var BAIDU_PAN_API_OVERRIDE = 'http://localhost:8787';
 ```
 
 ### 启动前端本地服务器

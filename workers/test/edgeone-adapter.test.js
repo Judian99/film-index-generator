@@ -54,3 +54,19 @@ test('adapter defaults CORS to the production origin without any env', async () 
     'https://www.filmindex.site'
   );
 });
+
+test('FRONTEND_ORIGIN trailing slash is stripped so CORS actually matches', async () => {
+  // 浏览器 Origin 头不带尾斜杠；控制台里手填 "https://x/" 是很容易犯的错，
+  // 带上斜杠回显就永远匹配不上，表现为「CORS 明明配了却被拒」。
+  const response = await onRequest({
+    request: new Request('https://www.filmindex.site/api/status'),
+    env: { FRONTEND_ORIGIN: 'https://www.filmindex.site/' },
+    params: {},
+    waitUntil() {}
+  });
+
+  assert.equal(
+    response.headers.get('Access-Control-Allow-Origin'),
+    'https://www.filmindex.site'
+  );
+});
