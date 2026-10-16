@@ -2,6 +2,9 @@
 node_modules/
 .wrangler/
 
+# EdgeOne 边缘函数单文件产物（由 npm run build:edgeone 生成）
+edgeone/dist/
+
 # Environment files
 .env
 .dev.vars

@@ -40,15 +40,20 @@ npx wrangler deploy
 
 ## 前端配置
 
-`baidu-pan-config.js` 使用普通脚本全局变量：
+`baidu-pan-config.js` 现在是「留空走同域 `/api`，填地址则指向该地址」：
 
 ```javascript
-var BAIDU_PAN_API = 'https://film-index-baidu-pan.1946378724.workers.dev';
+// 回退到 Cloudflare Workers 时填写；留空则走 EdgeOne 同域 /api
+var BAIDU_PAN_API_OVERRIDE = 'https://film-index-baidu-pan.1946378724.workers.dev';
 ```
 
 ## 验证部署
 
-1. 访问 `https://judian99.github.io/film-index-generator/`。
+> 注意：`wrangler.toml` 里的 `FRONTEND_ORIGIN` 已钉在 `https://www.filmindex.site`，
+> 因此必须从该域名访问验证。备用地址 `judian99.github.io` 只能验证前端渲染，
+> 百度导入会失败（`FRONTEND_ORIGIN` 未放行它，切换覆盖地址后还会变成 404）。
+
+1. 访问 `https://www.filmindex.site/`。
 2. 点击“从百度网盘导入”。
 3. 完成百度授权并返回应用。
 4. 再次点击导入按钮，确认文件浏览器正常打开。

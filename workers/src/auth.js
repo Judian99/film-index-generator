@@ -4,6 +4,7 @@
  */
 
 import { getAuthUrl } from './lib/baidu-pan.js';
+import { withBasePath } from './lib/http.js';
 
 export async function handleAuth(request, env, ctx) {
   const url = new URL(request.url);
@@ -15,8 +16,8 @@ export async function handleAuth(request, env, ctx) {
     });
   }
 
-  // 生成回调 URL
-  const redirectUri = `${url.origin}/callback`;
+  // 生成回调 URL（含部署前缀，需与百度开放平台登记的地址一致）
+  const redirectUri = `${url.origin}${withBasePath(env, '/callback')}`;
 
   // 生成授权 URL
   const authUrl = getAuthUrl(

@@ -6,23 +6,29 @@
 
 ## 架构说明
 
+同一份 `src/` 可以部署到两种运行时，区别只在外层适配：
+
 ```
-用户浏览器 (GitHub Pages)
-    ↓ API 调用
-Cloudflare Workers (本目录)
-    ↓ API 调用
-百度网盘开放平台 API
+方式 A（独立域名）                方式 B（同域，推荐）
+用户浏览器 (GitHub Pages)    →    用户浏览器 + 边缘函数同域
+    ↓ API 调用                        ↓ /api/* 路径
+Cloudflare Workers (本目录)   →    EdgeOne 边缘函数
+    ↓                                 ↓
+百度网盘开放平台 API           →    百度网盘开放平台 API
 ```
 
 **核心特性：**
-- ✅ 完全免费（Cloudflare Workers 每天 10 万次请求免费）
-- ✅ 国内访问稳定（Cloudflare 在国内有 CDN 节点）
+- ✅ 完全免费（Cloudflare Workers 或 EdgeOne 免费版额度都远超本项目的用量）
 - ✅ 无需服务器（零运维）
 - ✅ 用户隐私保护（图片流式传输，不落地存储）
 
+方式 B 把 API 挂在与前端相同的域名和路径前缀（`/api`）下，带来两个好处：
+登录 Cookie 由第三方变一方（不再受 Safari ITP / Chrome 第三方 Cookie 收紧影响），
+以及不需要 CORS。代码里已经为此预留了 `API_BASE_PATH` 配置，见部署方式 B。
+
 ---
 
-## 部署步骤
+## 部署方式 A：Cloudflare Workers
 
 ### 步骤 1：注册百度网盘开放平台
 
@@ -55,10 +61,10 @@ cd workers
 
 # 设置百度网盘 API 密钥
 wrangler secret put BAIDU_CLIENT_ID
-# 输入您的 client_id
+# 输入百度控制台的 AppKey（即 OAuth 的 client_id，不是 AppID）
 
 wrangler secret put BAIDU_CLIENT_SECRET
-# 输入您的 client_secret
+# 输入百度控制台的 SecretKey（即 client_secret）
 
 wrangler secret put TOKEN_ENCRYPTION_KEY
 # 输入一个 32 字符的随机字符串，用于加密 token
@@ -69,8 +75,8 @@ wrangler secret put TOKEN_ENCRYPTION_KEY
 
 ```toml
 [vars]
-FRONTEND_URL = "https://your-username.github.io/film-index-generator/"
-FRONTEND_ORIGIN = "https://your-username.github.io"
+FRONTEND_URL = "https://www.filmindex.site/"
+FRONTEND_ORIGIN = "https://www.filmindex.site"
 ```
 
 ### 步骤 4：部署 Workers
@@ -106,6 +112,100 @@ https://film-index-baidu-pan.workers.dev/callback
 - 应用上线前需要提交审核
 - 审核周期约 3-7 个工作日
 - 准备应用说明文档和演示截图
+
+---
+
+## 部署方式 B：EdgeOne 边缘函数（同域）
+
+适用于「前端已经通过腾讯云 EdgeOne 加速 + 自定义域名对外提供服务」的场景。
+API 以 `/api` 前缀挂在同一域名下，前端无需跨域访问。
+
+> 注意：这里用的是**站点级边缘函数**（站点 → 边缘函数 → 函数管理），
+> 入口是 `addEventListener('fetch', ...)`。它和 EdgeOne Makers / Pages Functions
+> （`export default onRequest(context)`）不是同一套接口，不要混用。
+
+### 步骤 1：打包成单文件
+
+站点级边缘函数只能在控制台单文件编辑，所以要先打包：
+
+```bash
+cd workers
+npm install
+npm run build:edgeone
+```
+
+产物是 `workers/edgeone/dist/film-index-baidu-pan.js`（约 24 KB）。
+
+### 步骤 2：创建并部署函数
+
+1. EdgeOne 控制台 → 服务总览 → 你的站点 → **边缘函数 → 函数管理**
+2. **新建函数**，函数名如 `film-index-baidu-pan`（字母数字连字符，2–30 字符，创建后不可改名）
+3. 清空模板代码，粘贴上一步的产物，**创建并部署**
+
+### 步骤 3：配置环境变量与密钥
+
+在函数详情的「环境变量与密钥」模块中创建（**改完需点部署才生效**）：
+
+| 变量名 | 类型 | 填什么 |
+|--------|------|--------|
+| `BAIDU_CLIENT_ID` | Secret | 百度控制台的 **AppKey**（⚠️ **不是 AppID**） |
+| `BAIDU_CLIENT_SECRET` | Secret | 百度控制台的 **SecretKey** |
+| `TOKEN_ENCRYPTION_KEY` | Secret | 32 个 ASCII 字符的随机串，自备 |
+| `FRONTEND_URL` | String | `https://www.filmindex.site/` |
+| `FRONTEND_ORIGIN` | String | `https://www.filmindex.site` |
+| `API_BASE_PATH` | String | `/api`，必须与触发规则一致 |
+
+> ⚠️ **`client_id` 填 AppKey 而不是 AppID** 是百度这边最常见的坑：填 AppID 时授权页照常打开
+> （不校验），但换 token 那一步会失败，且报错信息指向不了根因。
+> 用 AppKey/SecretKey 在 `workers/src/lib/baidu-pan.js` 的换 token 请求里才对得上。
+
+Secret 类型保存后不可再查看，请先妥善保存。变量名创建后不可修改。
+
+### 步骤 4：配置触发规则
+
+在函数详情点「新增触发规则」，匹配：
+
+| 匹配类型 | 运算符 | 值 |
+|----------|--------|-----|
+| URL Path | 通配符匹配 | `/api/*` |
+
+### 步骤 5：切换前端入口
+
+回到主项目，编辑 `baidu-pan-config.js`，把 `BAIDU_PAN_API_OVERRIDE` 置为空字符串：
+
+```javascript
+var BAIDU_PAN_API_OVERRIDE = '';
+```
+
+前端即自动使用 `location.origin + '/api'`。回退到方式 A 时把 Workers 地址填回来即可。
+
+### 步骤 6：更新百度回调地址并重新授权
+
+在百度开放平台应用详情页的【安全配置】里，把授权回调地址改为：
+
+```
+https://www.filmindex.site/api/callback
+```
+
+必须与 EdgeOne 上的实际地址**逐字一致**，否则换 token 会被拒。
+
+改完后**必须重新走一次授权**——旧 Cookie 是按旧回调地址换来的，且浏览器里
+可能还留着指向旧域名的登录态。
+
+### 运行时限制（部署前需知）
+
+| 项 | 限制 | 对本项目的影响 |
+|----|------|---------------|
+| 入口 | 只允许注册**一个** `fetch` 监听器 | 已符合 |
+| 单次 CPU | 200 ms（不含 I/O 等待） | `/files` 大目录是唯一风险点，建议压测 |
+| `fetch` 次数 | 单次运行最多 64 次、最多 8 并发 | 目录分页上限 20 次 + imagelist 1 次，安全 |
+| `fetch` 超时 | 默认 15 s，最大可配 300 s | 慢网下下载大原图可能被截断 |
+| 代码包 | 5 MB | 产物约 24 KB |
+| 环境变量 | 最多 64 个，值 ≤ 5 KB，**创建后不可改名** | 够用 |
+| 日志 | 免费版无日志分析/离线日志 | 排障比 `wrangler tail` 困难 |
+
+`/download` 走的是流式转发（`new Response(response.body, ...)`），
+边缘函数支持 `ReadableStream` 响应体，大文件不会被读进内存。
 
 ---
 
@@ -150,11 +250,13 @@ http://localhost:8787/callback
 
 | 变量名 | 说明 | 是否必需 |
 |--------|------|---------|
-| `BAIDU_CLIENT_ID` | 百度网盘开放平台应用 ID | ✅ 必需 |
-| `BAIDU_CLIENT_SECRET` | 百度网盘开放平台应用密钥 | ✅ 必需 |
+| `BAIDU_CLIENT_ID` | 百度控制台的 **AppKey**（对应 OAuth 的 `client_id`，不是 AppID） | ✅ 必需 |
+| `BAIDU_CLIENT_SECRET` | 百度控制台的 **SecretKey**（对应 `client_secret`） | ✅ 必需 |
 | `TOKEN_ENCRYPTION_KEY` | Token 加密密钥（32字符） | ✅ 必需 |
 | `FRONTEND_URL` | OAuth 成功后的完整前端跳转地址 | ✅ 必需 |
 | `FRONTEND_ORIGIN` | CORS 允许的前端来源，仅包含协议和域名 | ✅ 必需 |
+| `API_BASE_PATH` | 部署路径前缀，如 `/api`；独立域名部署时留空 | 方式 B 必需 |
+| `COOKIE_SAME_SITE` | 登录 Cookie 的 SameSite，默认 `None`（配合 Secure 跨站） | 可选 |
 
 ---
 

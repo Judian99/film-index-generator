@@ -287,3 +287,75 @@ test('logout clears the auth cookie and returns JSON', async () => {
   assert.match(response.headers.get('Set-Cookie') || '', /^bd_token=;/);
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), ENV.FRONTEND_ORIGIN);
 });
+
+test('API_BASE_PATH routes prefixed paths and generates prefixed public URLs', async () => {
+  const env = { ...ENV, API_BASE_PATH: '/api' };
+
+  // 无 token 的 status 不触发上游请求
+  const status = await workerRequest('/api/status', null, env);
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).logged_in, false);
+
+  // 回调地址必须与控制台登记的地址逐字一致，否则百度会拒绝换取 token
+  const auth = await workerRequest('/api/auth', null, { ...env, BAIDU_CLIENT_ID: 'client-id' });
+  assert.equal(auth.status, 302);
+  const authLocation = new URL(auth.headers.get('Location'));
+  assert.equal(authLocation.searchParams.get('redirect_uri'), 'https://worker.test/api/callback');
+
+  // 缩略图地址必须带前缀，否则前端会打到静态站而不是边缘函数
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = requestUrl(input);
+    if (url.searchParams.get('method') === 'list') {
+      return jsonResponse({ errno: 0, total_num: 0, list: [] });
+    }
+    if (url.searchParams.get('method') === 'imagelist') {
+      return jsonResponse({ errno: 0, info: [imageRecord(2)] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const response = await workerRequest('/api/files?path=/Album', await authCookie(), env);
+    const data = await response.json();
+    assert.equal(new URL(data.files[0].thumbnail_url).pathname, '/api/thumbnail');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  // 宽松匹配：未加前缀的路径同样可路由（生产由触发规则保证只收到 /api/*）
+  assert.equal((await workerRequest('/status', null, env)).status, 200);
+});
+
+test('callback exchanges the code with the prefixed redirect_uri', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async input => {
+    calls.push(requestUrl(input));
+    return jsonResponse({ access_token: 'at', refresh_token: 'rt', expires_in: 3600 });
+  };
+
+  try {
+    const env = {
+      ...ENV,
+      API_BASE_PATH: '/api',
+      BAIDU_CLIENT_ID: 'client-id',
+      BAIDU_CLIENT_SECRET: 'client-secret',
+      FRONTEND_URL: 'https://judian99.github.io/'
+    };
+    const response = await workerRequest('/api/callback?code=code-1', null, env);
+    assert.equal(response.status, 302);
+    assert.equal(calls[0].searchParams.get('redirect_uri'), 'https://worker.test/api/callback');
+    assert.equal(response.headers.get('Location'), 'https://judian99.github.io/');
+    assert.match(response.headers.get('Set-Cookie') || '', /SameSite=None/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('COOKIE_SAME_SITE defaults to None and can be switched to Lax', async () => {
+  const defaults = await workerRequest('/logout', await authCookie());
+  assert.match(defaults.headers.get('Set-Cookie') || '', /SameSite=None/);
+
+  const lax = await workerRequest('/logout', await authCookie(), { ...ENV, COOKIE_SAME_SITE: 'Lax' });
+  assert.match(lax.headers.get('Set-Cookie') || '', /SameSite=Lax/);
+});

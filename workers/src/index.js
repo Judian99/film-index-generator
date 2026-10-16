@@ -2,7 +2,7 @@
  * Worker 入口 - 路由分发
  */
 
-import { corsHeaders, jsonResponse, resolveOrigin } from './lib/http.js';
+import { corsHeaders, jsonResponse, resolveBasePath, resolveOrigin } from './lib/http.js';
 import { handleAuth } from './auth.js';
 import { handleCallback } from './callback.js';
 import { handleStatus } from './status.js';
@@ -17,7 +17,15 @@ import { handleLogout } from './logout.js';
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const path = url.pathname;
+    const basePath = resolveBasePath(env);
+    // 路由匹配用去掉前缀的路径；handler 仍拿原始 request（含前缀），
+    // 以便 withBasePath 生成对外地址。
+    // 故意保持宽松：未加前缀的路径也能命中，便于本地调试；生产上
+    // 触发规则只会把 /api/* 送进来。
+    let path = url.pathname;
+    if (basePath && (path === basePath || path.startsWith(`${basePath}/`))) {
+      path = path.slice(basePath.length) || '/';
+    }
     const origin = resolveOrigin(env);
 
     // CORS 预检请求

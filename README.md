@@ -32,7 +32,14 @@
 
 ### 1. 在线使用
 
-访问：[https://judian99.github.io/film-index-generator/](https://judian99.github.io/film-index-generator/)
+**推荐访问：[https://www.filmindex.site/](https://www.filmindex.site/)**
+
+自定义域名走腾讯云 EdgeOne 边缘加速，国内访问更稳定。
+
+备用地址（GitHub Pages）：[https://judian99.github.io/film-index-generator/](https://judian99.github.io/film-index-generator/)
+
+> 两个地址的功能完全一致，仅「从百度网盘导入」例外：该功能依赖推荐域名下的同域后端
+> （`/api` 前缀），在备用地址上会请求失败。需要导入网盘照片请使用推荐地址。
 
 ### 2. 下载 Release 压缩包
 

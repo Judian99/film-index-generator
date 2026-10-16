@@ -4,10 +4,59 @@
 
 import { decryptToken } from './crypto.js';
 
-export const DEFAULT_FRONTEND_ORIGIN = 'https://judian99.github.io';
+export const DEFAULT_FRONTEND_ORIGIN = 'https://www.filmindex.site';
+export const DEFAULT_SAME_SITE = 'None';
 
 export function resolveOrigin(env) {
   return env?.FRONTEND_ORIGIN || DEFAULT_FRONTEND_ORIGIN;
+}
+
+/**
+ * 部署路径前缀。同域部署（EdgeOne 站点边缘函数）时设为 '/api'，
+ * 独立域名部署（Cloudflare Workers）时留空。
+ */
+export function resolveBasePath(env) {
+  const raw = env?.API_BASE_PATH;
+  if (typeof raw !== 'string' || !raw.trim()) return '';
+
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+/**
+ * 拼接对外可访问的绝对路径（含前缀），用于回调地址与缩略图地址生成
+ */
+export function withBasePath(env, path) {
+  return `${resolveBasePath(env)}${path}`;
+}
+
+/**
+ * Cookie 的 SameSite 属性。同域部署后可改为 'Lax' 以提高健壮性；
+ * 前端与 API 跨站时必须保持 'None'（配合 Secure）。
+ */
+export function resolveSameSite(env) {
+  const raw = env?.COOKIE_SAME_SITE;
+  if (typeof raw !== 'string' || !raw.trim()) return DEFAULT_SAME_SITE;
+
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'lax') return 'Lax';
+  if (normalized === 'strict') return 'Strict';
+  return 'None';
+}
+
+/**
+ * 登录 Cookie 的 Set-Cookie 值；maxAge 为 0 表示清除
+ */
+export function authCookieHeader(value, env, maxAge) {
+  return [
+    `bd_token=${value}`,
+    'HttpOnly',
+    'Secure',
+    `SameSite=${resolveSameSite(env)}`,
+    `Max-Age=${maxAge}`,
+    'Path=/'
+  ].join('; ');
 }
 
 /**

@@ -1,6 +1,6 @@
 import { listFiles, listImages } from './lib/baidu-pan.js';
 import { encryptToken } from './lib/crypto.js';
-import { getTokenFromCookie, jsonResponse, resolveOrigin, tokenFingerprint } from './lib/http.js';
+import { getTokenFromCookie, jsonResponse, resolveOrigin, tokenFingerprint, withBasePath } from './lib/http.js';
 
 const DIRECTORY_BATCH_SIZE = 1000;
 const MAX_DIRECTORY_PAGES = 20;
@@ -38,9 +38,16 @@ export async function handleFiles(request, env, ctx) {
     const directories = directoryFiles
       .filter(file => Number(file.isdir ?? file.is_dir) === 1)
       .map(file => normalizeDirectory(file));
+    const thumbnailPath = withBasePath(env, '/thumbnail');
     const images = await Promise.all((imageList.info || [])
       .filter(file => Number(file.isdir ?? file.is_dir) !== 1)
-      .map(file => normalizeImage(file, request.url, accountFingerprint, env.TOKEN_ENCRYPTION_KEY)));
+      .map(file => normalizeImage(
+        file,
+        request.url,
+        thumbnailPath,
+        accountFingerprint,
+        env.TOKEN_ENCRYPTION_KEY
+      )));
     const files = mergeFiles(directories, images.filter(Boolean));
 
     return jsonResponse(origin, 200, {
@@ -111,7 +118,7 @@ function normalizeDirectory(file) {
   };
 }
 
-async function normalizeImage(file, requestUrl, accountFingerprint, encryptionKey) {
+async function normalizeImage(file, requestUrl, thumbnailPath, accountFingerprint, encryptionKey) {
   const filename = fileName(file);
   if (!IMAGE_EXTENSIONS.some(extension => filename.toLowerCase().endsWith(extension))) {
     return null;
@@ -131,7 +138,7 @@ async function normalizeImage(file, requestUrl, accountFingerprint, encryptionKe
       sourceUrl,
       expiresAt: Date.now() + 60 * 60 * 1000
     }), encryptionKey);
-    const proxyUrl = new URL('/thumbnail', requestUrl);
+    const proxyUrl = new URL(thumbnailPath, requestUrl);
     proxyUrl.searchParams.set('ticket', ticket);
     thumbnailUrl = proxyUrl.toString();
   }

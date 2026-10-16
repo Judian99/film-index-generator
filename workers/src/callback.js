@@ -5,11 +5,12 @@
 
 import { exchangeToken } from './lib/baidu-pan.js';
 import { encryptToken } from './lib/crypto.js';
+import { authCookieHeader, withBasePath } from './lib/http.js';
 
 export async function handleCallback(request, env, ctx) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
-  const redirectUri = `${url.origin}/callback`;
+  const redirectUri = `${url.origin}${withBasePath(env, '/callback')}`;
 
   if (!code) {
     return new Response('Authorization failed: no code received', { status: 400 });
@@ -42,20 +43,11 @@ export async function handleCallback(request, env, ctx) {
     const frontendUrl = env.FRONTEND_URL || '/';
 
     // 使用 new Response 构造重定向，以便设置自定义头
-    const cookieParts = [
-      `bd_token=${encryptedToken}`,
-      'HttpOnly',
-      'Secure',
-      'SameSite=None',
-      `Max-Age=${tokenData.expires_in || 2592000}`,
-      'Path=/'
-    ];
-
     return new Response(null, {
       status: 302,
       headers: {
         'Location': frontendUrl,
-        'Set-Cookie': cookieParts.join('; ')
+        'Set-Cookie': authCookieHeader(encryptedToken, env, tokenData.expires_in || 2592000)
       }
     });
 
