@@ -3005,6 +3005,109 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     });
   }
 
+  // 导出画布兜底探针：显存/内存压力下 GPU 画布可能静默光栅失败——
+  // 不抛错、toBlob 也成功，但画面近全黑或近全透明，交付出去就是"黑片"。
+  // 非透明底优先校验画布四条边：背景是最先铺满整幅的填充，边缘必为纸底色。
+  // blur 底的边缘可能被照片覆盖，退回整幅降采样统计；探针自身异常绝不阻断正常导出。
+  function probeExportCanvas(
+    canvas,
+    { transparent = false, blurred = false, multiFrame = true } = {},
+  ) {
+    try {
+      const coverage = sampleCanvasCoverage(canvas);
+      // 照片纹理上传失败、矢量填充仍成功时：深色片基/帧底在、亮内容几乎没有。
+      // 阈值按整页（多行+纸底间隙）校准；单帧片基占比天然高，不做此项判定。
+      const framesAllBlack = multiFrame && coverage.black >= 0.5 && coverage.bright < 0.3;
+      // 背景画了但所有胶片行都没画出来：整页近乎纯纸色
+      const sheetEmpty = multiFrame && coverage.bright > 0.99 && coverage.black < 0.005;
+
+      if (transparent) {
+        // 透明底：纸底区域本就透明；整幅无绘制痕迹，或只剩深色片基黑帧，都算失败
+        const ok = coverage.opaque >= 0.015 && !framesAllBlack;
+        return { ok, ...coverage };
+      }
+      if (!blurred) {
+        // 非透明底：画布最外边缘必为纸底色；全后端失败时整边皆黑（JPEG 把透明压成黑）
+        const edge = sampleCanvasPaperEdges(canvas);
+        const paperOk = edge.sampled === 0 || edge.paperRatio >= 0.5;
+        const ok = paperOk && !framesAllBlack && !sheetEmpty;
+        return { ok, paperRatio: edge.paperRatio, ...coverage };
+      }
+      // blur 底：模糊照片铺满整幅，只能按亮度分布判定，阈值故意远离正常照片
+      const ok = coverage.bright >= 0.1 && coverage.black < 0.85;
+      return { ok, ...coverage };
+    } catch (error) {
+      console.warn("导出画布探针执行失败，跳过校验", error);
+      return { ok: true };
+    }
+  }
+
+  // 取画布顶/底两条 1px 边带缩放进软件探针，统计纸底亮色（#f7f1e6 / 纯白）占比。
+  // 背景是铺满整幅的原子填充：静默失败时顶底皆无纸色，正常时两边全为纸底。
+  function sampleCanvasPaperEdges(canvas) {
+    const SAMPLES = 24;
+    const edgeProbe = document.createElement("canvas");
+    edgeProbe.width = SAMPLES;
+    edgeProbe.height = 2;
+    const probeCtx = edgeProbe.getContext("2d", { willReadFrequently: true });
+    if (!probeCtx) return { sampled: 0, paperRatio: 0 };
+    try {
+      probeCtx.drawImage(canvas, 0, 0, canvas.width, 1, 0, 0, SAMPLES, 1);
+      probeCtx.drawImage(canvas, 0, canvas.height - 1, canvas.width, 1, 0, 1, SAMPLES, 1);
+      const { data } = probeCtx.getImageData(0, 0, SAMPLES, 2);
+      let paper = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const a = data[i + 3];
+        if (a >= 200 && Math.min(r, g, b) >= 200) paper += 1;
+      }
+      return { sampled: SAMPLES * 2, paperRatio: paper / (SAMPLES * 2) };
+    } catch (error) {
+      return { sampled: 0, paperRatio: 0 };
+    }
+  }
+
+  // 整幅降采样统计：不透明覆盖、亮像素（按白底合成）、近纯黑像素占比
+  function sampleCanvasCoverage(canvas) {
+    const PROBE_WIDTH = 64;
+    const probeWidth = Math.min(PROBE_WIDTH, canvas.width);
+    const probeHeight = Math.max(
+      1,
+      Math.min(canvas.height, Math.round((probeWidth * canvas.height) / canvas.width)),
+    );
+    const probe = document.createElement("canvas");
+    probe.width = probeWidth;
+    probe.height = probeHeight;
+    const probeCtx = probe.getContext("2d", { willReadFrequently: true });
+    if (!probeCtx) return { opaque: 1, bright: 1, black: 0 };
+    probeCtx.drawImage(canvas, 0, 0, probeWidth, probeHeight);
+    const { data } = probeCtx.getImageData(0, 0, probeWidth, probeHeight);
+    const total = probeWidth * probeHeight;
+    let opaqueCount = 0;
+    let bright = 0;
+    let pitchBlack = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+      if (a < 8) continue;
+      opaqueCount += 1;
+      // 按白底合成估算亮度，排除半透明边缘干扰
+      const mix = (channel) => Math.round(channel * (a / 255) + 255 * (1 - a / 255));
+      const lightness = Math.max(mix(r), mix(g), mix(b));
+      if (lightness >= 100) bright += 1;
+      if (a >= 200 && Math.max(r, g, b) < 32) pitchBlack += 1;
+    }
+    return {
+      opaque: opaqueCount / total,
+      bright: bright / total,
+      black: pitchBlack / total,
+    };
+  }
+
   // 物理模式：PNG 注入 pHYs，JPG 改写 JFIF 密度。密度用标称 DPI（画布始终锚定纸张）
   async function embedPhysicalMetadata(blob, mimeType, meta) {
     const buffer = await blob.arrayBuffer();
@@ -3188,6 +3291,16 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
         return;
       }
 
+      const exportProbe = probeExportCanvas(outputCanvas, {
+        transparent: options.backgroundMode === "transparent",
+        blurred: options.backgroundMode === "blur" && !state.lightTable.active,
+      });
+      if (!exportProbe.ok) {
+        console.error("导出画布像素校验未通过，疑似显存/内存不足导致静默渲染失败", exportProbe);
+        showNotice("导出失败：画面未能渲染（已拦截黑图），请关闭占用内存的程序、降低输出倍数或减少照片数量后重试");
+        return;
+      }
+
       try {
         let blob = await canvasToBlob(outputCanvas, mimeType, quality);
         if (isPhysical) blob = await embedPhysicalMetadata(blob, mimeType, meta);
@@ -3357,6 +3470,16 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
       } catch (error) {
         console.error("打印画布绘制失败", error);
         showNotice("打印失败：浏览器无法创建该尺寸画布，请降低输出质量或减少照片数量");
+        return;
+      }
+
+      const printProbe = probeExportCanvas(outputCanvas, {
+        transparent: options.backgroundMode === "transparent",
+        blurred: options.backgroundMode === "blur" && !state.lightTable.active,
+      });
+      if (!printProbe.ok) {
+        console.error("打印画布像素校验未通过，疑似显存/内存不足导致静默渲染失败", printProbe);
+        showNotice("打印失败：画面未能渲染，请关闭占用内存的程序、降低输出质量或减少照片数量后重试");
         return;
       }
 
@@ -4613,7 +4736,7 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
       || (snapshot.backgroundMode === "blur" && Boolean(snapshot.backgroundItem));
     options.sprocketHoleMode = canvasFilled ? "fill" : "punch";
     FilmFrame.renderSingleFrameInBounds(outputCtx, snapshot.item, options, bounds);
-    return { canvas, options, bounds };
+    return { canvas, options, bounds, canvasFilled };
   }
 
   function getPrimaryFrameExportSnapshot(exportState = state.frameExportState) {
@@ -4925,8 +5048,17 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
       throw error;
     }
     if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
-    const { canvas } = renderFrameExportCanvas(snapshot, scale, exportState.mimeType);
+    const { canvas, canvasFilled } = renderFrameExportCanvas(snapshot, scale, exportState.mimeType);
     if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
+    const frameProbe = probeExportCanvas(canvas, {
+      transparent: !canvasFilled,
+      blurred: canvasFilled && snapshot.backgroundMode === "blur",
+      multiFrame: false,
+    });
+    if (!frameProbe.ok) {
+      console.error("单帧导出画布像素校验未通过，疑似显存/内存不足导致静默渲染失败", frameProbe);
+      throw new Error("FRAME_EXPORT_BLANK_CANVAS");
+    }
     const blob = await canvasToBlob(canvas, exportState.mimeType, exportState.quality);
     if (exportState.cancelled) throw new DOMException("Aborted", "AbortError");
     const extension = exportState.mimeType === "image/jpeg" ? "jpg" : "png";
@@ -4994,6 +5126,8 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
         frameExportStatus.textContent = `输出尺寸 ${width} × ${height} px 超过浏览器上限，请改用 3x`;
       } else if (error.message === "FRAME_EXPORT_SOURCE_CHANGED") {
         frameExportStatus.textContent = "图片状态已变化，请关闭后重新打开";
+      } else if (error.message === "FRAME_EXPORT_BLANK_CANVAS") {
+        frameExportStatus.textContent = "画面未能渲染（已拦截黑图），请关闭占用内存的程序或降低输出质量后重试";
       } else {
         console.error("单帧导出失败", error);
         frameExportStatus.textContent = exportState.mode === "batch" ? "批量导出失败，请降低输出质量后重试" : "单帧导出失败，请降低输出质量后重试";
