@@ -5,7 +5,7 @@
 
 import { exchangeToken } from './lib/baidu-pan.js';
 import { encryptToken } from './lib/crypto.js';
-import { authCookieHeader, withBasePath } from './lib/http.js';
+import { authCookieHeader, resolveOrigin, withBasePath } from './lib/http.js';
 
 export async function handleCallback(request, env, ctx) {
   const url = new URL(request.url);
@@ -40,7 +40,8 @@ export async function handleCallback(request, env, ctx) {
     );
 
     // 重定向回前端，携带加密的 token
-    const frontendUrl = env.FRONTEND_URL || '/';
+    // 未配置时回落到前端来源域名，省掉一个必须手配的环境变量
+    const frontendUrl = env.FRONTEND_URL || `${resolveOrigin(env)}/`;
 
     // 使用 new Response 构造重定向，以便设置自定义头
     return new Response(null, {

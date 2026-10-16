@@ -352,6 +352,22 @@ test('callback exchanges the code with the prefixed redirect_uri', async () => {
   }
 });
 
+test('callback falls back to the frontend origin when FRONTEND_URL is unset', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse({
+    access_token: 'at', refresh_token: 'rt', expires_in: 3600
+  });
+
+  try {
+    const { FRONTEND_URL, ...withoutFrontendUrl } = ENV;
+    const response = await workerRequest('/callback?code=code-1', null, withoutFrontendUrl);
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('Location'), `${ENV.FRONTEND_ORIGIN}/`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('COOKIE_SAME_SITE defaults to None and can be switched to Lax', async () => {
   const defaults = await workerRequest('/logout', await authCookie());
   assert.match(defaults.headers.get('Set-Cookie') || '', /SameSite=None/);

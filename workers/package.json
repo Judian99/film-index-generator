@@ -8,8 +8,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "test": "node --test",
-    "build:edgeone": "node scripts/build-edgeone.mjs"
+    "test": "node --test"
   },
   "devDependencies": {
     "wrangler": "^3.0.0"
