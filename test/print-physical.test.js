@@ -133,3 +133,76 @@ test("PAGE_A4_MM 尺寸", () => {
   assert.equal(P.PAGE_A4_MM.landscape.w, 297);
   assert.equal(P.PAGE_A4_MM.landscape.h, 210);
 });
+
+test("PAGE_A3_MM 尺寸与纸张索引", () => {
+  assert.equal(P.PAGE_A3_MM.portrait.w, 297);
+  assert.equal(P.PAGE_A3_MM.portrait.h, 420);
+  assert.equal(P.PAGE_A3_MM.landscape.w, 420);
+  assert.equal(P.PAGE_A3_MM.landscape.h, 297);
+  assert.equal(P.PAGE_SIZES_MM.a3, P.PAGE_A3_MM);
+  assert.equal(P.PAGE_SIZES_MM.a4, P.PAGE_A4_MM);
+});
+
+test("getPageSpec 解析纸张与方向", () => {
+  const a3 = P.getPageSpec("a3-portrait");
+  assert.equal(a3.size, "a3");
+  assert.equal(a3.orientation, "portrait");
+  assert.equal(a3.name, "A3");
+  assert.equal(a3.w, 297);
+  assert.equal(a3.h, 420);
+  assert.equal(a3.cssSize, "A3");
+  assert.equal(P.getPageSpec("a3-landscape").cssSize, "A3 landscape");
+  assert.equal(P.getPageSpec("a4-portrait").cssSize, "A4");
+  assert.equal(P.getPageSpec("a4-landscape").cssSize, "A4 landscape");
+  assert.equal(P.getPageSpec("free"), null);
+  assert.equal(P.getPageSpec("a2-portrait"), null);
+  assert.equal(P.getPageSpec(""), null);
+});
+
+test("buildPrintPlan A3 横向分页", () => {
+  const plan = P.buildPrintPlan({
+    preset: "a3-landscape",
+    canvasW: 4961 * 3,
+    canvasH: 3508 * 3,
+    pageCount: 3,
+    isPhysical: true,
+    dpi: 300,
+  });
+  assert.equal(plan.pageSize, "A3 landscape");
+  assert.equal(plan.pageCount, 3);
+  assert.equal(plan.pages.length, 3);
+  plan.pages.forEach((page) => {
+    assert.equal(page.pw, 420);
+    assert.equal(page.ph, 297);
+  });
+});
+
+test("buildPrintPlan free 物理模式按 DPI 换算 mm", () => {
+  const plan = P.buildPrintPlan({
+    preset: "free",
+    canvasW: 3508,
+    canvasH: 2480,
+    isPhysical: true,
+    dpi: 300,
+  });
+  assert.equal(plan.pageCount, 1);
+  assert.ok(Math.abs(plan.pages[0].pw - 297) < 0.02);
+  assert.ok(Math.abs(plan.pages[0].ph - 210) < 0.05);
+  assert.equal(plan.pageSize, `${plan.pages[0].pw}mm ${plan.pages[0].ph}mm`);
+});
+
+test("buildPrintPlan free 非物理模式按 96 DPI 换算 mm", () => {
+  const plan = P.buildPrintPlan({
+    preset: "free",
+    canvasW: 96 * 2,
+    canvasH: 96,
+    isPhysical: false,
+  });
+  assert.ok(Math.abs(plan.pages[0].pw - 50.8) < 0.02);
+  assert.ok(Math.abs(plan.pages[0].ph - 25.4) < 0.02);
+});
+
+test("A3 横向页宽可容纳 10 张 135 画幅", () => {
+  // 420 - 8×2 页边距 - 3×2 片边距 = 398；10 张需 10×36 + 9×2 = 378
+  assert.equal(P.fitColumns(420 - 16 - 6, 36, 2), 10);
+});

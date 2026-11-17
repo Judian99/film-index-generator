@@ -33,7 +33,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" />
-    <link rel="stylesheet" href="styles.css?v=20261012f-sidebar" />
+    <link rel="stylesheet" href="styles.css?v=20261117a-a3-export" />
   </head>
   <body>
     <main class="app-shell">
@@ -581,7 +581,14 @@
           </div>
           <button type="button" class="frame-export-close" id="exportModalClose" aria-label="关闭">×</button>
         </div>
-        <div class="frame-export-body">
+        <div class="frame-export-body export-modal-body">
+          <div class="export-preview-pane">
+            <div class="frame-export-preview-wrap export-preview-wrap">
+              <canvas id="exportPreviewCanvas" width="1" height="1" role="img" aria-label="导出效果预览"></canvas>
+              <span class="export-preview-badge" id="exportPreviewBadge" hidden></span>
+            </div>
+            <p class="export-preview-meta" id="exportPreviewMeta" aria-live="polite">—</p>
+          </div>
           <div class="frame-export-controls">
             <label class="field">
               <span>输出质量</span>
@@ -597,13 +604,33 @@
               </span>
             </label>
             <label class="field">
-              <span>页面比例</span>
+              <span>页面尺寸</span>
               <select id="exportPagePreset">
                 <option value="free" selected>当前比例</option>
                 <option value="a4-portrait">A4 竖向（1:√2）</option>
                 <option value="a4-landscape">A4 横向（√2:1）</option>
+                <option value="a3-portrait">A3 竖向（297×420mm）</option>
+                <option value="a3-landscape">A3 横向（420×297mm）</option>
               </select>
-              <small class="field-hint">选择 A4 后会自动优化每行张数，并居中扩展画布，不裁切照片</small>
+              <small class="field-hint">A4/A3 会居中扩展画布，不裁切照片；A3 固定按真实尺寸输出</small>
+            </label>
+            <label class="field">
+              <span>每行张数</span>
+              <select id="exportColumnsSelect" aria-describedby="exportColumnsHint">
+                <option value="auto" selected>自动适配</option>
+                <option value="2">2 张</option>
+                <option value="3">3 张</option>
+                <option value="4">4 张</option>
+                <option value="5">5 张</option>
+                <option value="6">6 张</option>
+                <option value="7">7 张</option>
+                <option value="8">8 张</option>
+                <option value="9">9 张</option>
+                <option value="10">10 张</option>
+                <option value="11">11 张</option>
+                <option value="12">12 张</option>
+              </select>
+              <small id="exportColumnsHint" class="field-hint">自动时按纸张与画幅优化列数</small>
             </label>
             <label class="field">
               <span>格式</span>
@@ -622,6 +649,7 @@
                 <span>真实尺寸打印（按毫米锚定）</span>
               </label>
               <small class="field-hint">按真实底片尺寸渲染（135 标准帧 = 36 × 24 mm）并写入打印密度。打印时请选“实际大小 / 100%”并关闭无边距；若使用“适合纸张”，用下方校准补偿</small>
+              <small id="exportPhysicalLockHint" class="field-hint" hidden>A3 版式固定按真实尺寸输出；切换其他页面尺寸后可关闭</small>
             </div>
             <div id="physicalOptions" hidden>
               <label class="field">
@@ -640,7 +668,7 @@
                   <option value="10">10 mm（喷墨机保守值）</option>
                   <option value="12">12 mm</option>
                 </select>
-                <small class="field-hint">按打印机不可打印区域预留，A4 内容只在安全区内排布</small>
+                <small class="field-hint">按打印机不可打印区域预留，内容只在页面安全区内排布</small>
               </label>
               <label class="field">
                 <span class="field-label-with-value">
@@ -672,9 +700,9 @@
     <script src="film-frame-shared.js?v=20260823-shared"></script>
     <script src="film-frame-135.js?v=20261011-edgenum"></script>
     <script src="film-frame.js?v=20260823-shared"></script>
-    <script src="print-physical.js?v=20260923-print"></script>
+    <script src="print-physical.js?v=20261117a-a3-print"></script>
     <script src="optical-loupe.js"></script>
-    <script src="app.js?v=20261016a-black-canvas-guard"></script>
+    <script src="app.js?v=20261117a-a3-export"></script>
     <script src="gsap-ui.js?v=20261012-sidebar"></script>
   </body>
 </html>

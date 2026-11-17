@@ -2240,6 +2240,62 @@ canvas {
   background: conic-gradient(#ffffff 0 25%, #e3e1db 0 50%, #ffffff 0 75%, #e3e1db 0) 0 0 / 36px 36px;
 }
 
+/* 整图导出弹窗：加宽为两栏，左侧为导出效果预览 */
+#exportModal .frame-export-container {
+  width: min(860px, calc(100vw - 40px));
+}
+
+#exportModal .export-modal-body {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  align-items: start;
+}
+
+.export-preview-pane {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.export-preview-wrap {
+  position: relative;
+  min-height: 320px;
+  max-height: 520px;
+  padding: 12px;
+}
+
+#exportPreviewCanvas {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 2px;
+  box-shadow: var(--shadow-2);
+}
+
+.export-preview-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.export-preview-meta {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
 .frame-export-controls {
   display: grid;
   align-content: start;
@@ -3406,6 +3462,26 @@ body::-webkit-scrollbar-thumb:hover,
 
   .film-stage {
     padding: 22px 18px 26px;
+  }
+}
+
+/* 整图导出弹窗窄屏：预览与控件改单列 */
+@media (max-width: 760px) {
+  #exportModal .frame-export-container {
+    width: min(100vw - 20px, 560px);
+  }
+
+  #exportModal .export-modal-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #exportModal .export-preview-wrap {
+    min-height: 220px;
+    max-height: 340px;
+  }
+
+  #exportModal #exportPreviewCanvas {
+    max-height: 300px;
   }
 }
 

@@ -68,6 +68,8 @@
   const frameWidthInput = document.getElementById("frameWidth");
   const exportScale = document.getElementById("exportScale");
   const exportPagePreset = document.getElementById("exportPagePreset");
+  const exportColumnsSelect = document.getElementById("exportColumnsSelect");
+  const exportColumnsHint = document.getElementById("exportColumnsHint");
   const formatSelect = document.getElementById("formatSelect");
   const qualityField = document.getElementById("qualityField");
   const jpgQuality = document.getElementById("jpgQuality");
@@ -130,6 +132,10 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   const calibValue = document.getElementById("calibValue");
   const physicalReadoutSize = document.getElementById("physicalReadoutSize");
   const physicalReadoutDetail = document.getElementById("physicalReadoutDetail");
+  const exportPhysicalLockHint = document.getElementById("exportPhysicalLockHint");
+  const exportPreviewCanvas = document.getElementById("exportPreviewCanvas");
+  const exportPreviewBadge = document.getElementById("exportPreviewBadge");
+  const exportPreviewMeta = document.getElementById("exportPreviewMeta");
   const filmStage = document.getElementById("filmStage");
   const filmTitle = document.getElementById("filmTitle");
   const filmDescription = document.getElementById("filmDescription");
@@ -169,6 +175,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     sortRequestGeneration: 0,
     exportHydrationItems: null,
     exportCancelled: false,
+    exportPreviewTimer: 0,
     sourceCommitPromise: Promise.resolve(),
     isExporting: false,
     lightTable: {
@@ -348,6 +355,10 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   const PRINT_CALIBRATION_KEY = "filmIndex.printCalibration";
   const PRINT_DPI_KEY = "filmIndex.printDpi";
   const PRINT_MARGIN_KEY = "filmIndex.printMargin";
+  const EXPORT_COLUMNS_KEY = "filmIndex.exportColumns";
+  const MAX_EXPORT_COLUMNS = 12;
+  // 导出弹窗预览的目标边长（px）；多页时只预览第 1 页
+  const EXPORT_PREVIEW_MAX_SIDE = 900;
 
   function loadPrintSettings() {
     const read = (key, fallback) => {
@@ -376,11 +387,25 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     }
   }
 
+  function loadExportColumnsPreference() {
+    try {
+      const value = localStorage.getItem(EXPORT_COLUMNS_KEY);
+      if (!value || value === "auto") return "auto";
+      const columns = Number(value);
+      return Number.isInteger(columns) && columns >= 2 && columns <= MAX_EXPORT_COLUMNS
+        ? String(columns)
+        : "auto";
+    } catch {
+      return "auto";
+    }
+  }
+
   const printSettings = loadPrintSettings();
   exportDpi.value = String(printSettings.dpi);
   physicalMargin.value = String(printSettings.margin);
   exportCalibration.value = String(Math.round(printSettings.calibration * 200) / 2);
   calibValue.textContent = `${exportCalibration.value}%`;
+  exportColumnsSelect.value = loadExportColumnsPreference();
 
   // 可调渲染参数（均为相对"单张宽度"或所在分区的比例）。
   // 侧栏"高级设置"菜单内有滑块可实时调整。
@@ -587,24 +612,96 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     control.addEventListener("change", handleFrameModeChange);
   });
 
+  function hasFixedExportColumns() {
+    return is120Format() || is135WideFormat() || isCroppedHalfFrameMode();
+  }
+
+  // 导出列数：auto 返回 null；固定画幅不参与自定义，交给布局按纸张适配
+  function getExportColumnOverride() {
+    if (hasFixedExportColumns()) return null;
+    if (exportColumnsSelect.value === "auto") return null;
+    const minimum = isHalfFrameMode() && !isCroppedHalfFrameMode() ? 4 : 2;
+    return clamp(Number(exportColumnsSelect.value) || minimum, minimum, MAX_EXPORT_COLUMNS);
+  }
+
+  // 物理布局用到的毫米几何，与 getPhysicalExportLayout 共用
+  function getPhysicalStripMetrics() {
+    const format = getFormat();
+    if (format.family === "120") {
+      return {
+        slotWMm: format.imageWidthMm,
+        gapMm: 56 * TUNE.gap120,
+        stripPadXMm: 56 * 0.05,
+      };
+    }
+    const cropped = isCroppedHalfFrameMode();
+    return {
+      slotWMm: cropped ? 18 : format.imageWidthMm,
+      gapMm: cropped ? 1 : 2,
+      stripPadXMm: 3,
+    };
+  }
+
+  function getPhysicalPageMaxColumns(preset = exportPagePreset.value) {
+    const spec = PrintPhysical.getPageSpec(preset);
+    if (!spec) return null;
+    const { margin } = loadPrintSettings();
+    const { slotWMm, gapMm, stripPadXMm } = getPhysicalStripMetrics();
+    return Math.min(
+      MAX_EXPORT_COLUMNS,
+      PrintPhysical.fitColumns(
+        spec.w - margin * 2 - stripPadXMm * 2,
+        slotWMm,
+        gapMm,
+      ),
+    );
+  }
+
+  function syncExportColumnsControl() {
+    const fixed = hasFixedExportColumns();
+    exportColumnsSelect.disabled = fixed;
+    const half = isHalfFrameMode() && !isCroppedHalfFrameMode();
+    Array.from(exportColumnsSelect.options).forEach((option) => {
+      if (option.value === "auto") return;
+      option.disabled = half && Number(option.value) < 4;
+    });
+    updateExportColumnsHint();
+  }
+
+  function updateExportColumnsHint() {
+    if (hasFixedExportColumns()) {
+      exportColumnsHint.textContent = "当前画幅每行张数固定，导出时按纸张宽度自动适配";
+      return;
+    }
+    const maxColumns = exportPhysical.checked ? getPhysicalPageMaxColumns() : null;
+    const requested = getExportColumnOverride();
+    if (maxColumns && requested !== null && requested > maxColumns) {
+      exportColumnsHint.textContent = `当前纸张按页宽最多 ${maxColumns} 张/行，导出会自动限制为 ${maxColumns} 张`;
+      return;
+    }
+    if (maxColumns) {
+      exportColumnsHint.textContent = `当前纸张按页宽最多 ${maxColumns} 张/行；自动模式会使用该值`;
+      return;
+    }
+    exportColumnsHint.textContent = "自动时按页面比例优化，也可指定 2–12 张/行";
+  }
+
+  function getPageLabel(preset = exportPagePreset.value) {
+    const spec = PrintPhysical.getPageSpec(preset);
+    if (!spec) return "当前比例";
+    return `${spec.name} ${spec.orientation === "landscape" ? "横向" : "竖向"}`;
+  }
+
   function updateExportFormatControls() {
     if (exportPhysical.checked) {
       formatSelect.disabled = false;
       qualityField.style.display = formatSelect.value === "image/jpeg" ? "grid" : "none";
-      if (!exportModal.hidden) {
-        updateExportMemoryWarning();
-      }
       return;
     }
     const fullResolution = exportScale.value === "full";
     if (fullResolution) formatSelect.value = "image/png";
     formatSelect.disabled = fullResolution;
     qualityField.style.display = !fullResolution && formatSelect.value === "image/jpeg" ? "grid" : "none";
-
-    // 导出模态框打开时实时更新内存警告
-    if (!exportModal.hidden) {
-      updateExportMemoryWarning();
-    }
   }
 
   function updateExportMemoryWarning() {
@@ -613,10 +710,12 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
 
     let layout;
     let columns;
+    let pageCount = 1;
     if (exportPhysical.checked) {
       const physical = getPhysicalExportLayout(items.length);
       layout = physical.layout;
       columns = physical.meta.columns;
+      pageCount = physical.meta.pageCount;
     } else {
       const isFullResolution = exportScale.value === "full";
       const scale = isFullResolution
@@ -631,13 +730,13 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     const estimatedPeakBytes = estimatedPixelBytes * 2;
     const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
     const memoryWarningThreshold = 500 * 1024 * 1024;
-    const preset = exportPagePreset.value;
-    const orientation = preset.endsWith("-landscape") ? "横向" : "竖向";
+    const pageSpec = PrintPhysical.getPageSpec(exportPagePreset.value);
     if (estimatedPeakBytes > memoryWarningThreshold) {
       exportMemoryWarning.textContent = `⚠ 导出约需 ${estimatedPeakMB}MB 内存，老旧设备可能闪退，建议降低导出质量或减少照片`;
-    } else if (preset !== "free") {
+    } else if (pageSpec) {
       const physicalPrefix = exportPhysical.checked ? "真实尺寸 · " : "";
-      exportMemoryWarning.textContent = `${physicalPrefix}A4 ${orientation} · 每行 ${columns} 张 · ${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} px`;
+      const pageText = pageCount > 1 ? ` · ${pageCount} 页` : "";
+      exportMemoryWarning.textContent = `${physicalPrefix}${getPageLabel()}${pageText} · 每行 ${columns} 张 · ${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} px`;
     } else {
       exportMemoryWarning.textContent = "";
     }
@@ -651,34 +750,55 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       return;
     }
     const { layout, meta } = getPhysicalExportLayout(items.length);
-    const preset = exportPagePreset.value;
+    const pageSpec = PrintPhysical.getPageSpec(exportPagePreset.value);
+    const pageLabel = getPageLabel();
+    const clampText = meta.columnsClamped
+      ? `（已按页宽限制，最多 ${meta.maxColumns} 张/行）`
+      : "";
     if (meta.pageCount > 1) {
-      physicalReadoutSize.textContent = `A4 × ${meta.pageCount} 页 · 每页 ${meta.columns} 列`;
-    } else if (preset === "free") {
+      physicalReadoutSize.textContent = `${pageLabel} × ${meta.pageCount} 页 · 每页 ${meta.columns} 张/行`;
+    } else if (!pageSpec) {
       physicalReadoutSize.textContent = `${layout.canvasW.toLocaleString()} × ${layout.canvasH.toLocaleString()} px`;
     } else {
-      physicalReadoutSize.textContent = `A4 单页 · ${meta.columns} 列`;
+      physicalReadoutSize.textContent = `${pageLabel} 单页 · ${meta.columns} 张/行`;
     }
     let detail = `单帧 ${meta.frameMm} mm（校准 ${Math.round(meta.calibration * 100)}%）\n本批 ${items.length} 张`;
+    detail += `\n每页 ${meta.columns} 张/行${clampText}`;
     if (meta.pageCount > 1) {
-      detail += `\n画布高 = ${meta.pageCount} 页 A4，页间不会切断胶片帧，打印须选实际大小`;
+      detail += `\n共 ${meta.pageCount} 页，页间不会切断胶片帧，打印须选实际大小`;
     }
-    if (preset === "free") {
+    if (!pageSpec) {
       const heightMm = layout.canvasH / PrintPhysical.getPxPerMm(meta.dpi, meta.calibration);
       if (heightMm > 297) {
-        detail += "\n高度超过一张 A4，free 模式可能在任意位置切开，建议改用 A4 比例";
+        detail += "\n高度超过一张 A4，free 模式可能在任意位置切开，建议改用 A4/A3 页面尺寸";
       }
     }
     physicalReadoutDetail.textContent = detail;
   }
 
+  function refreshExportInfo({ preview = true } = {}) {
+    updateExportMemoryWarning();
+    if (exportPhysical.checked) updatePhysicalReadout();
+    updateExportColumnsHint();
+    if (preview) scheduleExportPreview();
+  }
+
   function updatePhysicalControls() {
+    const preset = exportPagePreset.value;
+    const pageSpec = PrintPhysical.getPageSpec(preset);
+    // A3 代表真实纸张：强制开启并锁定真实尺寸，避免仅比例输出造成误导
+    const forcePhysical = Boolean(pageSpec && pageSpec.size === "a3");
+    if (forcePhysical) exportPhysical.checked = true;
+    exportPhysical.disabled = forcePhysical;
+    exportPhysicalLockHint.hidden = !forcePhysical;
+
     const on = exportPhysical.checked;
     physicalOptions.hidden = !on;
     exportScale.disabled = on;
-    physicalMarginField.hidden = exportPagePreset.value === "free";
+    physicalMarginField.hidden = !on || !pageSpec;
+    syncExportColumnsControl();
     updateExportFormatControls();
-    if (on) updatePhysicalReadout();
+    refreshExportInfo();
   }
 
   function openExportModal() {
@@ -688,41 +808,184 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       return;
     }
     updatePhysicalControls();
-    updateExportMemoryWarning();
     exportModal.hidden = false;
     document.body.style.overflow = "hidden";
+    refreshExportInfo();
     exportModalClose.focus();
   }
 
   function closeExportModal() {
     exportModal.hidden = true;
     document.body.style.overflow = "";
+    window.clearTimeout(state.exportPreviewTimer);
+    exportPreviewCanvas.width = 1;
+    exportPreviewCanvas.height = 1;
   }
 
-  exportScale.addEventListener("change", updateExportFormatControls);
-  exportPagePreset.addEventListener("change", () => {
-    physicalMarginField.hidden = exportPhysical.checked && exportPagePreset.value === "free";
-    updateExportMemoryWarning();
-    if (exportPhysical.checked) updatePhysicalReadout();
+  exportScale.addEventListener("change", () => {
+    updateExportFormatControls();
+    refreshExportInfo();
   });
-  formatSelect.addEventListener("change", updateExportFormatControls);
+  exportPagePreset.addEventListener("change", updatePhysicalControls);
+  formatSelect.addEventListener("change", () => {
+    updateExportFormatControls();
+    refreshExportInfo();
+  });
   exportPhysical.addEventListener("change", updatePhysicalControls);
+  exportColumnsSelect.addEventListener("change", () => {
+    persistPrintSetting(EXPORT_COLUMNS_KEY, exportColumnsSelect.value);
+    refreshExportInfo();
+  });
   exportDpi.addEventListener("change", () => {
     persistPrintSetting(PRINT_DPI_KEY, exportDpi.value);
-    updatePhysicalReadout();
-    updateExportMemoryWarning();
+    refreshExportInfo();
   });
   physicalMargin.addEventListener("change", () => {
     persistPrintSetting(PRINT_MARGIN_KEY, physicalMargin.value);
-    updatePhysicalReadout();
-    updateExportMemoryWarning();
+    refreshExportInfo();
   });
   exportCalibration.addEventListener("input", () => {
     calibValue.textContent = `${exportCalibration.value}%`;
     persistPrintSetting(PRINT_CALIBRATION_KEY, exportCalibration.value);
-    updatePhysicalReadout();
-    updateExportMemoryWarning();
+    refreshExportInfo();
   });
+
+  function resetExportPreview(message = "—") {
+    exportPreviewCanvas.width = 1;
+    exportPreviewCanvas.height = 1;
+    exportPreviewBadge.hidden = true;
+    exportPreviewMeta.textContent = message;
+  }
+
+  function scheduleExportPreview() {
+    window.clearTimeout(state.exportPreviewTimer);
+    if (exportModal.hidden) return;
+    state.exportPreviewTimer = window.setTimeout(renderExportPreview, 120);
+  }
+
+  function buildExportPreviewPlan(itemCount) {
+    const preset = exportPagePreset.value;
+    const pageSpec = PrintPhysical.getPageSpec(preset);
+    if (exportPhysical.checked) {
+      const actual = getPhysicalExportLayout(itemCount);
+      const firstPage = pageSpec && actual.layout.pages.length
+        ? actual.layout.pages[0]
+        : null;
+      const targetW = firstPage ? firstPage.w : actual.layout.canvasW;
+      const targetH = firstPage ? firstPage.h : actual.layout.canvasH;
+      const factor = Math.min(
+        1,
+        EXPORT_PREVIEW_MAX_SIDE / Math.max(1, targetW),
+        EXPORT_PREVIEW_MAX_SIDE / Math.max(1, targetH),
+      );
+      const previewDpi = Math.max(1, actual.meta.dpi * factor);
+      const preview = getPhysicalExportLayout(itemCount, { dpi: previewDpi });
+      const tile = pageSpec && preview.layout.pages.length
+        ? { x: 0, y: 0, width: preview.layout.pages[0].w, height: preview.layout.pages[0].h }
+        : null;
+      return {
+        options: preview.options,
+        layout: preview.layout,
+        tile,
+        pageSpec,
+        displayMeta: actual.meta,
+        displayLabel: getPageLabel(preset),
+        exportW: actual.layout.canvasW,
+        exportH: actual.layout.canvasH,
+      };
+    }
+
+    const actualScale = exportScale.value === "full"
+      ? getFullResolutionScale(state.items)
+      : clamp(Number(exportScale.value) || 1, 1, 3);
+    const actual = getExportRenderLayout(itemCount, actualScale, preset);
+    const actualLayout = actual.pageLayout;
+    const factor = Math.min(
+      1,
+      EXPORT_PREVIEW_MAX_SIDE / Math.max(1, actualLayout.canvasW),
+      EXPORT_PREVIEW_MAX_SIDE / Math.max(1, actualLayout.canvasH),
+    );
+    const preview = factor < 0.999
+      ? getExportRenderLayout(itemCount, actualScale * factor, preset)
+      : actual;
+    return {
+      options: preview.options,
+      layout: preview.pageLayout,
+      tile: null,
+      pageSpec,
+      displayMeta: null,
+      displayLabel: getPageLabel(preset),
+      exportW: actualLayout.canvasW,
+      exportH: actualLayout.canvasH,
+    };
+  }
+
+  function renderExportPreview() {
+    window.clearTimeout(state.exportPreviewTimer);
+    if (exportModal.hidden || state.isExporting) return;
+    const items = getSortedItems();
+    if (!items.length) {
+      resetExportPreview("请先添加照片");
+      return;
+    }
+
+    let plan;
+    try {
+      plan = buildExportPreviewPlan(items.length);
+    } catch (error) {
+      console.warn("导出预览布局计算失败", error);
+      resetExportPreview("预览生成失败，仍可导出");
+      return;
+    }
+
+    let previewOptions = plan.options;
+    if (
+      !exportPhysical.checked
+      && formatSelect.value === "image/jpeg"
+      && previewOptions.backgroundMode === "transparent"
+    ) {
+      previewOptions = { ...previewOptions, backgroundMode: "white" };
+    }
+
+    let rendered;
+    try {
+      rendered = renderArtworkToCanvas(items, previewOptions, plan.layout, plan.tile);
+    } catch (error) {
+      console.warn("导出预览绘制失败", error);
+      resetExportPreview("预览生成失败，仍可导出");
+      return;
+    }
+
+    try {
+      exportPreviewCanvas.width = rendered.width;
+      exportPreviewCanvas.height = rendered.height;
+      const previewCtx = exportPreviewCanvas.getContext("2d");
+      if (previewCtx) previewCtx.drawImage(rendered, 0, 0);
+    } finally {
+      rendered.width = 1;
+      rendered.height = 1;
+    }
+
+    const columns = plan.displayMeta ? plan.displayMeta.columns : plan.options.columns;
+    const pageCount = plan.displayMeta ? plan.displayMeta.pageCount : 1;
+    exportPreviewBadge.hidden = !(plan.pageSpec && pageCount > 1);
+    exportPreviewBadge.textContent = pageCount > 1 ? `第 1 页 / 共 ${pageCount} 页` : "";
+
+    let metaText;
+    if (exportPhysical.checked) {
+      const sizeText = plan.pageSpec
+        ? `${plan.pageSpec.w} × ${plan.pageSpec.h} mm`
+        : `${plan.exportW.toLocaleString()} × ${plan.exportH.toLocaleString()} px`;
+      metaText = `${plan.displayLabel} · ${sizeText} · ${plan.displayMeta.dpi} DPI · 每行 ${columns} 张 · 共 ${pageCount} 页`;
+      if (pageCount > 1) metaText += "（预览第 1 页）";
+      if (plan.displayMeta.columnsClamped) {
+        metaText += `\n已按页宽限制为 ${columns} 张/行`;
+      }
+    } else {
+      metaText = `${plan.displayLabel} · ${plan.exportW.toLocaleString()} × ${plan.exportH.toLocaleString()} px · 每行 ${columns} 张`;
+    }
+    exportPreviewMeta.textContent = metaText;
+  }
 
   zoomRange.addEventListener("input", () => {
     setPreviewZoom(Number(zoomRange.value) / 100);
@@ -2034,6 +2297,8 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       imageCoverageHint.textContent = wide135 ? "两个成像区域独立控制，仅改变曝光范围" : "仅适用于 135 宽幅";
       imageCoverageHint.hidden = wide135;
     }
+    syncExportColumnsControl();
+    if (!exportModal.hidden) refreshExportInfo();
   }
 
   async function handleFrameModeChange() {
@@ -2925,7 +3190,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     return scanlines;
   }
 
-  async function exportStreamedPng(items, options, layout, sizeLabel, bytesPerPixel = 3) {
+  async function exportStreamedPng(items, options, layout, sizeLabel, bytesPerPixel = 3, meta = null) {
     if (typeof CompressionStream !== "function") {
       throw new Error("PNG_STREAM_UNSUPPORTED");
     }
@@ -2942,6 +3207,13 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     const reader = compression.readable.getReader();
     const pngParts = [PNG_SIGNATURE, createPngHeader(layout.canvasW, layout.canvasH, bytesPerPixel === 4 ? 6 : 2)];
     let pngBytes = PNG_SIGNATURE.byteLength + 25;
+    if (meta) {
+      const physChunk = new Uint8Array(
+        PrintPhysical.buildPhysChunk(PrintPhysical.dpiToPxPerMeter(meta.dpi)),
+      );
+      pngParts.push(physChunk);
+      pngBytes += physChunk.byteLength;
+    }
     let previousRow = null;
     const consumeCompressed = (async () => {
       while (true) {
@@ -2962,7 +3234,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
         const bandHeight = getPngBandHeight(layout.canvasW, layout.canvasH - y, bytesPerPixel);
         const percent = Math.floor((y / layout.canvasH) * 100);
         exportButton.textContent = `取消导出（${percent}%）`;
-        statusTitle.textContent = `正在无损压缩原图级 PNG ${percent}%`;
+        statusTitle.textContent = `正在无损压缩大尺寸 PNG ${percent}%`;
         const scanlines = await renderPngBandRaw(items, options, layout, y, bandHeight, bytesPerPixel);
         previousRow = applyPngPaethFilter(scanlines, layout.canvasW, bandHeight, previousRow, bytesPerPixel);
         await writer.write(scanlines);
@@ -2976,11 +3248,14 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       const blob = new Blob(pngParts, { type: "image/png" });
       if (blob.size > MAX_STREAMED_PNG_BYTES) throw new Error("PNG_FILE_TOO_LARGE");
       const pagePart = getExportPageFilenamePart(layout.pagePreset);
-      const filename = ["film-index", pagePart, new Date().toISOString().slice(0, 10), "full-resolution"]
+      const suffix = meta ? `${meta.dpi}dpi` : "full-resolution";
+      const filename = ["film-index", pagePart, new Date().toISOString().slice(0, 10), suffix]
         .filter(Boolean)
         .join("-");
       downloadBlob(blob, `${filename}.png`);
-      showNotice(`原图级索引图已拼接为一张 ${sizeLabel} 像素的 PNG`);
+      showNotice(meta
+        ? `真实尺寸索引图已拼接为一张 ${sizeLabel} 像素的 PNG（${meta.dpi} DPI）`
+        : `原图级索引图已拼接为一张 ${sizeLabel} 像素的 PNG`);
     } catch (error) {
       try {
         await writer.abort(error);
@@ -3011,15 +3286,17 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
   // blur 底的边缘可能被照片覆盖，退回整幅降采样统计；探针自身异常绝不阻断正常导出。
   function probeExportCanvas(
     canvas,
-    { transparent = false, blurred = false, multiFrame = true } = {},
+    { transparent = false, blurred = false, multiFrame = true, sparse = false } = {},
   ) {
     try {
       const coverage = sampleCanvasCoverage(canvas);
       // 照片纹理上传失败、矢量填充仍成功时：深色片基/帧底在、亮内容几乎没有。
       // 阈值按整页（多行+纸底间隙）校准；单帧片基占比天然高，不做此项判定。
       const framesAllBlack = multiFrame && coverage.black >= 0.5 && coverage.bright < 0.3;
-      // 背景画了但所有胶片行都没画出来：整页近乎纯纸色
-      const sheetEmpty = multiFrame && coverage.bright > 0.99 && coverage.black < 0.005;
+      // 分页打印的末页可能只有一行：空白判定需比整页宽松，否则正常稀疏页会被误拦截
+      const sheetEmpty = multiFrame && (sparse
+        ? coverage.bright > 0.9995 && coverage.black < 0.0002
+        : coverage.bright > 0.99 && coverage.black < 0.005);
 
       if (transparent) {
         // 透明底：纸底区域本就透明；整幅无绘制痕迹，或只剩深色片基黑帧，都算失败
@@ -3179,8 +3456,8 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     };
   }
 
-  // 离屏渲染整幅作品，完成后恢复原有活动画布
-  function renderArtworkToCanvas(items, options, layout) {
+  // 离屏渲染整幅作品（或指定 tile 区域），完成后恢复原有活动画布
+  function renderArtworkToCanvas(items, options, layout, tile = null) {
     const previousCanvas = activeCanvas;
     const previousCtx = ctx;
     const outputCanvas = document.createElement("canvas");
@@ -3189,7 +3466,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     activeCanvas = outputCanvas;
     ctx = outputCtx;
     try {
-      drawLayout(items, options, layout);
+      drawLayout(items, options, layout, tile);
     } finally {
       activeCanvas = previousCanvas;
       ctx = previousCtx;
@@ -3222,7 +3499,7 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     state.isExporting = true;
     state.exportCancelled = false;
     setSourceEditingLocked(true);
-    exportButton.textContent = "取消原图下载";
+    exportButton.textContent = "取消导出";
 
     try {
       const items = await prepareArtworkSources();
@@ -3241,19 +3518,6 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       }
       const { isPhysical, isFullResolution, options, layout, meta, sizeLabel } = plan;
 
-      // 预估内存占用：RGBA 原始像素 + 编码缓冲（约 1.5–2 倍）
-      const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
-      const estimatedPeakBytes = estimatedPixelBytes * 2;
-      const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
-      const memoryWarningThreshold = 500 * 1024 * 1024; // 500MB 阈值
-
-      if (estimatedPeakBytes > memoryWarningThreshold) {
-        showNotice(
-          `导出约需 ${estimatedPeakMB}MB 内存，如遇闪退请降低导出质量或减少照片数量`,
-          5000,
-        );
-      }
-
       const exceedsCanvasLimit =
         !Number.isFinite(layout.canvasW) ||
         !Number.isFinite(layout.canvasH) ||
@@ -3262,7 +3526,29 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
         layout.canvasW > MAX_CANVAS_SIDE ||
         layout.canvasH > MAX_CANVAS_SIDE ||
         layout.canvasW * layout.canvasH > MAX_CANVAS_AREA;
-      const mimeType = isFullResolution ? "image/png" : formatSelect.value;
+      const willStream = exceedsCanvasLimit && (isFullResolution || isPhysical);
+
+      // 流式导出按条带渲染，不需要整幅画布的全部像素内存
+      if (!willStream) {
+        const estimatedPixelBytes = layout.canvasW * layout.canvasH * 4;
+        const estimatedPeakBytes = estimatedPixelBytes * 2;
+        const estimatedPeakMB = Math.round(estimatedPeakBytes / 1024 / 1024);
+        const memoryWarningThreshold = 500 * 1024 * 1024; // 500MB 阈值
+        if (estimatedPeakBytes > memoryWarningThreshold) {
+          showNotice(
+            `导出约需 ${estimatedPeakMB}MB 内存，如遇闪退请降低导出质量或减少照片数量`,
+            5000,
+          );
+        }
+      } else if (isPhysical) {
+        showNotice("该 A3/A4 长画布将按条带流式编码为 PNG，耗时较长但不受单张画布上限影响", 5000);
+      }
+
+      let mimeType = isFullResolution ? "image/png" : formatSelect.value;
+      if (willStream && isPhysical && mimeType === "image/jpeg") {
+        showNotice("超大真实尺寸画布需要流式编码，本次已从 JPG 切换为 PNG", 5000);
+        mimeType = "image/png";
+      }
       if (mimeType === "image/jpeg" && options.backgroundMode === "transparent") {
         showNotice("JPG 不支持透明背景，本次按纯白底导出");
         options.backgroundMode = "white";
@@ -3271,14 +3557,22 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       const extension = mimeType === "image/jpeg" ? "jpg" : "png";
 
       if (exceedsCanvasLimit) {
-        if (!isFullResolution) {
-          const limitMessage = isPhysical
-            ? `真实尺寸导出为 ${sizeLabel} 像素，超过浏览器画布上限（300DPI 约 4 页），请降至 150DPI 或减少照片数量`
-            : `导出尺寸为 ${sizeLabel} 像素，超过浏览器画布上限，请降低输出质量或尺寸基准后重试`;
-          showNotice(limitMessage);
+        if (!isFullResolution && !isPhysical) {
+          showNotice(`导出尺寸为 ${sizeLabel} 像素，超过浏览器画布上限，请降低输出质量或尺寸基准后重试`);
           return;
         }
-        await exportStreamedPng(items, options, layout, sizeLabel, options.backgroundMode === "transparent" ? 4 : 3);
+        if (mimeType !== "image/png") {
+          showNotice("该尺寸需要 PNG 流式导出，请将格式改为 PNG 或降低 DPI 后重试");
+          return;
+        }
+        await exportStreamedPng(
+          items,
+          options,
+          layout,
+          sizeLabel,
+          options.backgroundMode === "transparent" ? 4 : 3,
+          isPhysical ? meta : null,
+        );
         return;
       }
 
@@ -3310,10 +3604,10 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
           .join("-");
         downloadBlob(blob, `${filename}.${extension}`);
         if (isPhysical) {
-          const pageText = meta.pageCount > 1
-            ? `，共 ${meta.pageCount} 页`
-            : "";
-          showNotice(`已按 ${meta.dpi} DPI 真实尺寸导出，单帧 ${meta.frameMm} mm${pageText}（打印请选实际大小）`);
+          const pageText = meta.pageCount > 1 ? `，共 ${meta.pageCount} 页` : "";
+          showNotice(
+            `已按 ${meta.dpi} DPI 真实尺寸导出（${getPageLabel()} · 每行 ${meta.columns} 张${pageText}），单帧 ${meta.frameMm} mm（打印请选实际大小）`,
+          );
         }
       } catch (error) {
         console.error("导出画布编码失败", error);
@@ -3321,14 +3615,14 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
       }
     } catch (error) {
       if (error.name === "AbortError") {
-        showNotice("原图级 PNG 导出已取消");
+        showNotice("超大 PNG 导出已取消");
       } else if (error.message === "PNG_STREAM_UNSUPPORTED") {
-        showNotice("当前浏览器不支持超大 PNG 流式编码，请更新浏览器或改用 3x 导出");
+        showNotice("当前浏览器不支持大尺寸 PNG 流式编码，请更新浏览器、降低 DPI 或改用 3x 导出");
       } else if (error.message === "PNG_DIMENSIONS_TOO_LARGE" || error.message === "PNG_FILE_TOO_LARGE") {
-        showNotice("原图级 PNG 尺寸或体积过大，请降低尺寸基准、减少照片或改用 3x 导出");
+        showNotice("PNG 尺寸或体积过大，请降低 DPI/尺寸基准、减少照片或改用 3x 导出");
       } else {
         console.error("导出失败", error);
-        showNotice("原图级 PNG 拼接失败，请降低尺寸基准、减少照片或改用 3x 后重试");
+        showNotice("PNG 拼接失败，请降低 DPI/尺寸基准、减少照片或改用 3x 后重试");
       }
     } finally {
       state.isExporting = false;
@@ -3343,45 +3637,25 @@ const loupeFrameTag = document.getElementById("loupeFrameTag");
     }
   }
 
-  // 隐藏 iframe + @page 直连系统打印机；按逻辑页分页，页边界不切帧
-  function printArtwork(canvas, layout, { isPhysical, preset }) {
-    return new Promise((resolve) => {
-      const dataUrl = canvas.toDataURL("image/png");
+  // 打印：逐页图片 + @page 纸张尺寸；页边界不切帧
+  function printArtwork(sheets, plan) {
+    return new Promise((resolve, reject) => {
       const iframe = document.createElement("iframe");
       iframe.setAttribute("aria-hidden", "true");
       // 用 0 尺寸而非 display:none，部分浏览器要求 iframe 可渲染才允许打印
       iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
 
-      let pageSize;
-      let sheets;
-      if (preset !== "free") {
-        const landscape = preset.endsWith("-landscape");
-        const pw = landscape ? 297 : 210;
-        const ph = landscape ? 210 : 297;
-        pageSize = landscape ? "A4 landscape" : "A4";
-        sheets = layout.pages.map((_, i) => ({ pw, ph, top: -i * ph }));
-      } else {
-        // 自定义纸张：物理模式按标称打印密度换算，其余按 96DPI
-        const pxPerMm = isPhysical
-          ? PrintPhysical.getPxPerMm(loadPrintSettings().dpi)
-          : 96 / 25.4;
-        const wMm = roundTo(canvas.width / pxPerMm, 2);
-        const hMm = roundTo(canvas.height / pxPerMm, 2);
-        pageSize = `${wMm}mm ${hMm}mm`;
-        sheets = [{ pw: wMm, ph: hMm, top: 0 }];
-      }
-
       const sheetHtml = sheets.map((sheet) => `
         <div class="print-sheet" style="width:${sheet.pw}mm;height:${sheet.ph}mm">
-          <img alt="" src="${dataUrl}" style="width:${sheet.pw}mm;top:${sheet.top}mm">
+          <img alt="" src="${sheet.src}">
         </div>`).join("");
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>打印胶片索引图</title>
 <style>
-@page { size: ${pageSize}; margin: 0; }
+@page { size: ${plan.pageSize}; margin: 0; }
 html, body { margin: 0; padding: 0; background: #ffffff; }
 .print-sheet { position: relative; overflow: hidden; break-after: page; }
 .print-sheet:last-child { break-after: auto; }
-.print-sheet img { position: absolute; left: 0; display: block; }
+.print-sheet img { display: block; width: 100%; height: 100%; }
 </style></head><body>${sheetHtml}</body></html>`;
 
       let settled = false;
@@ -3391,27 +3665,41 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
         window.setTimeout(() => iframe.remove(), 300);
         resolve();
       };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        window.setTimeout(() => iframe.remove(), 300);
+        reject(error);
+      };
 
       // 在 iframe 元素上监听 load：srcdoc 导航会替换内部 Window，元素事件不受影响
       iframe.addEventListener("load", async () => {
-        const printWindow = iframe.contentWindow;
-        const printDoc = printWindow.document;
-        // 等待 data URL 图片加载完成（不用 img.decode，规避个别浏览器不返回）
-        const pending = [...printDoc.images].filter((img) => !img.complete);
-        if (pending.length) {
-          await new Promise((done) => {
-            let remaining = pending.length;
-            const tick = () => { remaining -= 1; if (remaining === 0) done(); };
-            pending.forEach((img) => {
-              img.addEventListener("load", tick, { once: true });
-              img.addEventListener("error", tick, { once: true });
+        try {
+          const printWindow = iframe.contentWindow;
+          const printDoc = printWindow.document;
+          // 等待 blob URL 图片加载完成（不用 img.decode，规避个别浏览器不返回）
+          const pending = [...printDoc.images].filter((img) => !img.complete);
+          if (pending.length) {
+            await new Promise((done) => {
+              let remaining = pending.length;
+              const tick = () => { remaining -= 1; if (remaining === 0) done(); };
+              pending.forEach((img) => {
+                img.addEventListener("load", tick, { once: true });
+                img.addEventListener("error", tick, { once: true });
+              });
             });
-          });
+          }
+          if ([...printDoc.images].some((img) => !img.naturalWidth)) {
+            fail(new Error("PRINT_IMAGE_LOAD_FAILED"));
+            return;
+          }
+          printWindow.addEventListener("afterprint", finish, { once: true });
+          printWindow.focus();
+          printWindow.print();
+          window.setTimeout(finish, 120000); // afterprint 不触发时兜底
+        } catch (error) {
+          fail(error);
         }
-        printWindow.addEventListener("afterprint", finish, { once: true });
-        printWindow.focus();
-        printWindow.print();
-        window.setTimeout(finish, 120000); // afterprint 不触发时兜底
       }, { once: true });
 
       // 先赋 srcdoc 再插入文档，确保元素 load 唯一对应 srcdoc（而非 about:blank）
@@ -3420,18 +3708,14 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
     });
   }
 
-  function roundTo(value, decimals) {
-    const factor = 10 ** decimals;
-    return Math.round(value * factor) / factor;
-  }
-
   async function printIndexImage() {
     const originalButtonText = exportButton.textContent;
     const originalButtonDisabled = exportButton.disabled;
+    const objectUrls = [];
     state.isExporting = true;
     state.exportCancelled = false;
     setSourceEditingLocked(true);
-    exportButton.textContent = "取消原图下载";
+    exportButton.textContent = "取消导出";
 
     try {
       const items = await prepareArtworkSources();
@@ -3449,52 +3733,98 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
         return;
       }
       const { isPhysical, options, layout, meta } = plan;
+      const preset = exportPagePreset.value;
+      const pageSpec = PrintPhysical.getPageSpec(preset);
+      const paged = Boolean(isPhysical && pageSpec && layout.pages && layout.pages.length);
 
-      // 打印必须在一张完整画布内完成，不支持流式
-      const exceeds =
-        layout.canvasW > MAX_CANVAS_SIDE ||
-        layout.canvasH > MAX_CANVAS_SIDE ||
-        layout.canvasW * layout.canvasH > MAX_CANVAS_AREA;
-      if (exceeds) {
-        showNotice("打印尺寸超过浏览器画布上限，请降低输出质量、DPI 或减少照片数量");
-        return;
+      // 分页模式逐页渲染，不要求整幅长画布落在上限内
+      if (!paged) {
+        const exceeds =
+          layout.canvasW > MAX_CANVAS_SIDE ||
+          layout.canvasH > MAX_CANVAS_SIDE ||
+          layout.canvasW * layout.canvasH > MAX_CANVAS_AREA;
+        if (exceeds) {
+          showNotice("打印尺寸超过浏览器画布上限，请降低输出质量、DPI 或减少照片数量");
+          return;
+        }
       }
       if (options.backgroundMode === "transparent" && formatSelect.value === "image/jpeg") {
         showNotice("JPG 不支持透明背景，本次按纯白底打印");
         options.backgroundMode = "white";
       }
 
-      let outputCanvas;
-      try {
-        outputCanvas = renderArtworkToCanvas(items, options, layout);
-      } catch (error) {
-        console.error("打印画布绘制失败", error);
-        showNotice("打印失败：浏览器无法创建该尺寸画布，请降低输出质量或减少照片数量");
-        return;
-      }
-
-      const printProbe = probeExportCanvas(outputCanvas, {
-        transparent: options.backgroundMode === "transparent",
-        blurred: options.backgroundMode === "blur" && !state.lightTable.active,
-      });
-      if (!printProbe.ok) {
-        console.error("打印画布像素校验未通过，疑似显存/内存不足导致静默渲染失败", printProbe);
-        showNotice("打印失败：画面未能渲染，请关闭占用内存的程序、降低输出质量或减少照片数量后重试");
-        return;
-      }
-
-      await printArtwork(outputCanvas, layout, {
+      const pageCount = paged ? layout.pages.length : 1;
+      const printPlan = PrintPhysical.buildPrintPlan({
+        preset,
+        canvasW: layout.canvasW,
+        canvasH: layout.canvasH,
+        pageCount,
         isPhysical,
-        preset: exportPagePreset.value,
+        dpi: meta?.dpi || loadPrintSettings().dpi,
       });
-      if (isPhysical) {
-        const pageText = meta.pageCount > 1 ? `，共 ${meta.pageCount} 页` : "";
-        showNotice(`打印任务已发送，单帧 ${meta.frameMm} mm${pageText}，请在打印对话框选择打印机`);
+
+      const sheets = [];
+      for (let index = 0; index < printPlan.pages.length; index += 1) {
+        const page = paged ? layout.pages[index] : null;
+        const tile = page ? { x: 0, y: page.y, width: page.w, height: page.h } : null;
+        if (tile && (tile.width > MAX_CANVAS_SIDE || tile.height > MAX_CANVAS_SIDE || tile.width * tile.height > MAX_CANVAS_AREA)) {
+          showNotice(`打印失败：第 ${index + 1} 页超过浏览器画布上限，请降低 DPI 或减少照片数量`);
+          return;
+        }
+
+        exportButton.textContent = `正在渲染打印页 ${index + 1}/${printPlan.pages.length}`;
+        let pageCanvas;
+        try {
+          pageCanvas = renderArtworkToCanvas(items, options, layout, tile);
+        } catch (error) {
+          console.error("打印画布绘制失败", error);
+          showNotice(`打印失败：第 ${index + 1} 页无法创建画布，请降低 DPI 或减少照片数量`);
+          return;
+        }
+
+        const printProbe = probeExportCanvas(pageCanvas, {
+          transparent: options.backgroundMode === "transparent",
+          blurred: options.backgroundMode === "blur" && !state.lightTable.active,
+          sparse: true,
+        });
+        if (!printProbe.ok) {
+          pageCanvas.width = 1;
+          pageCanvas.height = 1;
+          console.error("打印画布像素校验未通过，疑似显存/内存不足导致静默渲染失败", printProbe);
+          showNotice(`打印失败：第 ${index + 1} 页画面未能渲染，请降低 DPI 或减少照片数量后重试`);
+          return;
+        }
+
+        let blob;
+        try {
+          blob = await canvasToBlob(pageCanvas, "image/png", 1);
+        } catch (error) {
+          console.error("打印画布编码失败", error);
+          pageCanvas.width = 1;
+          pageCanvas.height = 1;
+          showNotice(`打印失败：第 ${index + 1} 页编码失败，请降低 DPI 或减少照片数量`);
+          return;
+        }
+        pageCanvas.width = 1;
+        pageCanvas.height = 1;
+        const objectUrl = URL.createObjectURL(blob);
+        objectUrls.push(objectUrl);
+        const pagePlan = printPlan.pages[index];
+        sheets.push({ src: objectUrl, pw: pagePlan.pw, ph: pagePlan.ph });
       }
+
+      await printArtwork(sheets, printPlan);
+      const pageText = printPlan.pageCount > 1 ? ` · 共 ${printPlan.pageCount} 页` : "";
+      showNotice(`打印任务已发送（${pageSpec ? getPageLabel() : "自定义纸张"}${pageText}），请在打印对话框选择打印机`);
     } catch (error) {
-      console.error("打印失败", error);
-      showNotice("打印失败，请重试");
+      if (error.message === "PRINT_IMAGE_LOAD_FAILED") {
+        showNotice("打印失败：页面图片加载失败，请重试");
+      } else {
+        console.error("打印失败", error);
+        showNotice("打印失败，请重试");
+      }
     } finally {
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
       state.isExporting = false;
       state.exportCancelled = false;
       state.exportHydrationItems = null;
@@ -3525,7 +3855,7 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
     const requestedColumns = columnsOverride === null
       ? Number(columnsSelect.value) || 6
       : Number(columnsOverride);
-    const selectedColumns = clamp(requestedColumns, minimumColumns, 8);
+    const selectedColumns = clamp(requestedColumns, minimumColumns, MAX_EXPORT_COLUMNS);
     const normalSixFrameAreaW = 6 * baseFrameW + 5 * normalGap;
     const wideSlotW = Math.round(format.imageWidthMm * pxPerMm135);
     const slotW = isCroppedHalfFrame ? baseFrameW / 2 : isWide135 ? wideSlotW : baseFrameW;
@@ -3760,44 +4090,45 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
   }
 
   // 物理模式打包器：替代 getExportRenderLayout/createExportPageLayout/scoreExportLayout
-  function getPhysicalExportLayout(itemCount) {
-    const { calibration, dpi, margin: marginMm } = loadPrintSettings();
+  function getPhysicalExportLayout(itemCount, { dpi: dpiOverride = null } = {}) {
+    const settings = loadPrintSettings();
+    const calibration = settings.calibration;
+    const dpi = Number.isFinite(dpiOverride) && dpiOverride > 0 ? dpiOverride : settings.dpi;
+    const marginMm = settings.margin;
     const preset = exportPagePreset.value;
-    const isA4 = preset !== "free";
+    const pageSpec = PrintPhysical.getPageSpec(preset);
+    const paged = Boolean(pageSpec);
     const format = getFormat();
-    const is120 = format.family === "120";
     const isHalfFrame = isHalfFrameMode();
     const isCroppedHalfFrame = isCroppedHalfFrameMode();
     // 画布按标称密度锚定纸张；胶片条内容含校准系数，校准才能改变帧与纸面的相对比例
     const nominalPxPerMm = PrintPhysical.getPxPerMm(dpi);
     const contentPxPerMm = PrintPhysical.getPxPerMm(dpi, calibration);
-
-    let slotWMm;
-    let gapMm;
-    let stripPadXMm;
-    if (is120) {
-      slotWMm = format.imageWidthMm;
-      gapMm = 56 * TUNE.gap120;
-      stripPadXMm = 56 * 0.05;
-    } else {
-      slotWMm = isCroppedHalfFrame ? 18 : format.imageWidthMm;
-      gapMm = isCroppedHalfFrame ? 1 : 2;
-      stripPadXMm = 3;
-    }
+    const { slotWMm, gapMm, stripPadXMm } = getPhysicalStripMetrics();
 
     const minimumColumns = isHalfFrame && !isCroppedHalfFrame ? 4 : 2;
+    const requestedColumns = getExportColumnOverride();
     let columns;
-    if (isA4) {
-      const orientation = preset.endsWith("-landscape") ? "landscape" : "portrait";
-      const pageMm = PrintPhysical.PAGE_A4_MM[orientation];
-      columns = PrintPhysical.fitColumns(
-        pageMm.w - marginMm * 2 - stripPadXMm * 2,
-        slotWMm,
-        gapMm,
+    let maxColumns = null;
+    let columnsClamped = false;
+    if (paged) {
+      maxColumns = Math.min(
+        MAX_EXPORT_COLUMNS,
+        PrintPhysical.fitColumns(
+          pageSpec.w - marginMm * 2 - stripPadXMm * 2,
+          slotWMm,
+          gapMm,
+        ),
       );
-      columns = clamp(columns, minimumColumns, 8);
+      columns = requestedColumns === null ? maxColumns : Math.min(requestedColumns, maxColumns);
+      columns = clamp(columns, 1, MAX_EXPORT_COLUMNS);
+      columnsClamped = requestedColumns !== null && requestedColumns > columns;
     } else {
-      columns = clamp(Number(columnsSelect.value) || 6, minimumColumns, 8);
+      columns = clamp(
+        requestedColumns === null ? (Number(columnsSelect.value) || 6) : requestedColumns,
+        minimumColumns,
+        MAX_EXPORT_COLUMNS,
+      );
     }
 
     const options = getPhysicalRenderOptions(contentPxPerMm, columns);
@@ -3811,14 +4142,14 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
     let contentX;
     let pages;
 
-    if (!isA4) {
+    if (!paged) {
       const stripW = options.frameAreaW + options.stripPadX * 2;
       canvasW = Math.round(stripW + options.sheetPad * 2);
       canvasH = Math.round(
         rows.length * stripH + (rows.length - 1) * options.rowGap + options.sheetPad * 2,
       );
       rowYs = PrintPhysical.planRowYs(rows.length, {
-        isA4: false,
+        paged: false,
         sheetPadPx: options.sheetPad,
         stripHPx: stripH,
         rowGapPx: options.rowGap,
@@ -3826,18 +4157,16 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
       contentX = 0;
       pages = [{ y: 0, w: canvasW, h: canvasH }];
     } else {
-      const orientation = preset.endsWith("-landscape") ? "landscape" : "portrait";
-      const pageMm = PrintPhysical.PAGE_A4_MM[orientation];
-      const pageWPx = Math.round(pageMm.w * nominalPxPerMm);
-      const pageHPx = Math.round(pageMm.h * nominalPxPerMm);
+      const pageWPx = Math.round(pageSpec.w * nominalPxPerMm);
+      const pageHPx = Math.round(pageSpec.h * nominalPxPerMm);
       const marginPx = Math.round(marginMm * nominalPxPerMm);
       const rowsPerPage = PrintPhysical.fitRows(
-        pageMm.h - marginMm * 2,
+        pageSpec.h - marginMm * 2,
         stripHMm,
         options.rowGap / contentPxPerMm,
       );
       rowYs = PrintPhysical.planRowYs(rows.length, {
-        isA4: true,
+        paged: true,
         pageHPx,
         marginPx,
         stripHPx: stripH,
@@ -3850,7 +4179,7 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
         w: pageWPx,
         h: pageHPx,
       }));
-      // 胶片条在固定 A4 画布内水平居中（k>1 超出时两侧等比出血）
+      // 胶片条在固定页面内水平居中（k>1 超出时两侧等比出血）
       const stripW = options.frameAreaW + options.stripPadX * 2;
       const stripLeft = Math.round((pageWPx - stripW) / 2);
       canvasW = pageWPx;
@@ -3875,7 +4204,16 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
     return {
       options,
       layout,
-      meta: { columns, dpi, calibration, frameMm, pageCount: pages.length },
+      meta: {
+        columns,
+        maxColumns,
+        requestedColumns,
+        columnsClamped,
+        dpi,
+        calibration,
+        frameMm,
+        pageCount: pages.length,
+      },
     };
   }
 
@@ -3973,7 +4311,10 @@ html, body { margin: 0; padding: 0; background: #ffffff; }
   }
 
   function getExportRenderLayout(itemCount, scale, preset = exportPagePreset.value) {
-    const candidates = preset === "free" ? null : getAdaptiveExportColumns();
+    const override = getExportColumnOverride();
+    const candidates = override !== null
+      ? [override]
+      : (preset === "free" ? null : getAdaptiveExportColumns());
     const columnChoices = candidates || [null];
     let best = null;
 

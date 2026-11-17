@@ -8,6 +8,62 @@
     landscape: Object.freeze({ w: 297, h: 210 }),
   });
 
+  const PAGE_A3_MM = Object.freeze({
+    portrait: Object.freeze({ w: 297, h: 420 }),
+    landscape: Object.freeze({ w: 420, h: 297 }),
+  });
+
+  const PAGE_SIZES_MM = Object.freeze({
+    a4: PAGE_A4_MM,
+    a3: PAGE_A3_MM,
+  });
+
+  // 纸张预设解析：a4/a3 + portrait/landscape；free 与非法值返回 null
+  function getPageSpec(preset) {
+    const match = /^(a3|a4)-(portrait|landscape)$/.exec(String(preset || ""));
+    if (!match) return null;
+    const size = match[1];
+    const orientation = match[2];
+    const mm = PAGE_SIZES_MM[size][orientation];
+    const name = size.toUpperCase();
+    return {
+      size,
+      orientation,
+      name,
+      w: mm.w,
+      h: mm.h,
+      cssSize: orientation === "landscape" ? `${name} landscape` : name,
+    };
+  }
+
+  // 打印计划：固定纸张按页尺寸重复；free 按渲染密度换算自定义 mm 单页
+  function buildPrintPlan({
+    preset = "free",
+    canvasW = 0,
+    canvasH = 0,
+    pageCount = 1,
+    isPhysical = false,
+    dpi = 300,
+  } = {}) {
+    const spec = getPageSpec(preset);
+    if (spec) {
+      const count = Math.max(1, Math.floor(pageCount) || 1);
+      return {
+        pageSize: spec.cssSize,
+        pageCount: count,
+        pages: Array.from({ length: count }, () => ({ pw: spec.w, ph: spec.h })),
+      };
+    }
+    const pxPerMm = isPhysical ? getPxPerMm(dpi) : 96 / MM_PER_INCH;
+    const pw = Math.round((canvasW / pxPerMm) * 100) / 100;
+    const ph = Math.round((canvasH / pxPerMm) * 100) / 100;
+    return {
+      pageSize: `${pw}mm ${ph}mm`,
+      pageCount: 1,
+      pages: [{ pw, ph }],
+    };
+  }
+
   // 自包含 CRC32（与 app.js 内实现相同，重复以支持 Node 独立单测）
   function makeCrc32Table() {
     return Array.from({ length: 256 }, (_, index) => {
@@ -145,9 +201,10 @@
     return Math.max(1, Math.floor((containerMm + rowGapMm) / (stripHMm + rowGapMm)));
   }
 
-  // 各行在整幅画布上的绝对 y。A4 模式页间额外缝隙 = 页高 − 安全区，落在此处不切帧
+  // 各行在整幅画布上的绝对 y。分页模式（A4/A3）页间额外缝隙 = 页高 − 安全区，落在此处不切帧
   function planRowYs(rowCount, {
-    isA4 = false,
+    paged = false,
+    isA4 = paged,
     pageHPx = 0,
     marginPx = 0,
     sheetPadPx = 0,
@@ -171,6 +228,10 @@
   window.PrintPhysical = Object.freeze({
     MM_PER_INCH,
     PAGE_A4_MM,
+    PAGE_A3_MM,
+    PAGE_SIZES_MM,
+    getPageSpec,
+    buildPrintPlan,
     updateCrc32,
     buildPngChunk,
     getPxPerMm,
